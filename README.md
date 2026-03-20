@@ -38,6 +38,15 @@ Build all targets:
 ./gradlew build
 ```
 
+## Dependency Locking
+
+Generate or refresh lockfiles for all resolvable Gradle configurations:
+```bash
+./gradlew resolveAndLockAll --write-locks
+```
+
+This updates `gradle.lockfile` (project dependencies) and `settings-gradle.lockfile` (settings/plugin dependencies).
+
 Build specific targets:
 ```bash
 ./gradlew jvmJar           # JVM JAR

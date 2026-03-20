@@ -1,0 +1,7 @@
+style:
+  MaxLineLength:
+    active: false
+
+formatting:
+  MaximumLineLength:
+    active: false
