@@ -1,6 +1,6 @@
 plugins {
-    kotlin("multiplatform") version "2.1.10"
-    kotlin("plugin.serialization") version "2.1.10"
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 group = "io.github.ddimtirov"
@@ -20,7 +20,7 @@ kotlin {
     @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
     wasmJs {
         browser()
-        nodejs() // FIXME: use Node 25
+        nodejs()
     }
     linuxX64()
     mingwX64 {
@@ -41,29 +41,29 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation("io.ktor:ktor-client-core:3.1.0")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+            implementation(libs.ktor.client.core)
+            implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
+            implementation(libs.kotlinx.coroutines.test)
         }
         jvmMain.dependencies {
-            implementation("io.ktor:ktor-client-java:3.1.0")
-            implementation("ch.qos.logback:logback-classic:1.5.16")
+            implementation(libs.ktor.client.java)
+            implementation(libs.logback.classic)
         }
         jvmTest.dependencies {
-            implementation("org.junit.jupiter:junit-jupiter:5.11.4")
-            runtimeOnly("org.junit.platform:junit-platform-launcher")
+            implementation(libs.junit.jupiter)
+            runtimeOnly(libs.junit.platform.launcher)
         }
         jsMain.dependencies {
-            implementation("io.ktor:ktor-client-js:3.1.0")
+            implementation(libs.ktor.client.js)
         }
         wasmJsMain.dependencies {
-            implementation("io.ktor:ktor-client-js:3.1.0")
+            implementation(libs.ktor.client.js)
         }
         nativeMain.dependencies {
-            implementation("io.ktor:ktor-client-curl:3.1.0")
+            implementation(libs.ktor.client.curl)
         }
     }
 }
