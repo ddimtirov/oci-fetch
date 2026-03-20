@@ -32,4 +32,4 @@ actual class OciClient actual constructor() {
 /**
  * JVM-specific URL encoding using java.net.URLEncoder.
  */
-internal actual fun urlEncode(s: String): String = java.net.URLEncoder.encode(s, Charsets.UTF_8)
+internal actual fun urlEncode(s: String): String = java.net.URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")

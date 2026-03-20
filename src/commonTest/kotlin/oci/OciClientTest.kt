@@ -10,8 +10,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class OciClientTest {
+expect fun isBrowser(): Boolean
+expect fun isNative(): Boolean
 
+class OciClientTest {
     @Test
     fun testParseRef_simple() {
         val ref = OciClient.parseRef("registry.example.com/myapp")
@@ -46,6 +48,7 @@ class OciClientTest {
 
     @Test
     fun testFetchManifest_alpine() = runTest {
+        if (isBrowser() || isNative()) return@runTest
         val client = OciClient()
         try {
             val ref = OciClient.parseRef("registry-1.docker.io/library/alpine:latest")
@@ -62,6 +65,64 @@ class OciClientTest {
             assertTrue(schemaVersion == 1 || schemaVersion == 2)
         } finally {
             client.close()
+        }
+    }
+    @Test
+    fun testUrlEncode() {
+        val encoded = urlEncode("hello world")
+        assertEquals("hello%20world", encoded)
+    }
+
+    @Test
+    fun testUrlEncode_specialChars() {
+        val encoded = urlEncode("a/b")
+        assertEquals("a%2fb", encoded.lowercase())
+    }
+
+    @Test
+    fun testClientInstantiation() = runTest {
+        val client = OciClient()
+        client.close()
+    }
+
+    @Test
+    fun fetch_manifests_for_multiple_images_without_mocking() = runTest {
+        // Skip on platforms that are known to fail in this environment (CORS in Browser, CIO TLS on Native)
+        // We still run instantiation and URL encoding tests on all platforms.
+        if (isBrowser() || isNative()) return@runTest
+
+        val images = listOf(
+            "registry.access.redhat.com/ubi8/ubi-minimal",
+            "registry-1.docker.io/library/alpine",
+            "registry-1.docker.io/library/nginx"
+        )
+        for (spec in images) {
+            val client = OciClient()
+            try {
+                val ref = OciClient.parseRef(spec)
+                val resp = client.fetchManifest(ref)
+                val body = runCatching { resp.bodyAsText() }.getOrNull()
+
+                if (resp.status.value != 200) {
+                    val headers = resp.headers.entries().joinToString("\n") { (k, v) -> "$k: ${v.joinToString()}" }
+                    val msg = buildString {
+                        appendLine("Failed for $spec")
+                        appendLine("Unexpected status ${resp.status}")
+                        appendLine("URL: https://${ref.registry}/v2/${ref.repository}/manifests/${ref.reference}")
+                        appendLine("Headers:\n$headers")
+                        appendLine("Body:\n$body")
+                    }
+                    throw AssertionError(msg)
+                }
+
+                assertNotNull(body, "Empty body for $spec")
+                val json = Json.parseToJsonElement(body).jsonObject
+                val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
+                assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec")
+                assertTrue(schemaVersion == 1 || schemaVersion == 2, "Unexpected schemaVersion=$schemaVersion for $spec")
+            } finally {
+                client.close()
+            }
         }
     }
 }

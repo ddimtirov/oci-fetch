@@ -37,12 +37,13 @@ actual class OciClient actual constructor() {
 internal actual fun urlEncode(s: String): String {
     val allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~".toSet()
     return buildString {
-        for (c in s) {
+        for (b in s.encodeToByteArray()) {
+            val c = b.toInt().toChar()
             if (c in allowed) {
                 append(c)
             } else {
                 append("%")
-                append(c.code.toString(16).uppercase().padStart(2, '0'))
+                append((b.toInt() and 0xFF).toString(16).uppercase().padStart(2, '0'))
             }
         }
     }
