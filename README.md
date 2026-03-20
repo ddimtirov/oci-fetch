@@ -4,32 +4,39 @@ A Kotlin Multiplatform library for fetching OCI (Open Container Initiative) imag
 
 ## Supported Platforms
 
-- **JVM** - Uses Java HTTP client
-- **JavaScript** - Uses JS fetch API (Node.js and Browser)
-- **WASM-JS** - Uses JS fetch API (Browser and Node.js)
-- **Native Windows (mingwX64)** - Uses libcurl
-- **Native Linux (linuxX64)** - Uses libcurl
+- **JVM** - Uses Java HTTP client (✅ Tested & Working)
+- **JavaScript** - Uses JS fetch API (✅ Tested & Working in Node.js)
+- **WASM-JS** - Uses JS fetch API (✅ Tested & Working in Node.js)
+- **Native Windows (mingwX64)** - ❌ Fails to link on current Windows environment (Missing MSYS2/OpenSSL)
+- **Native Linux (linuxX64)** - ❌ Fails to link on current Windows environment (Toolchain/OpenSSL issues)
 
 ## Running Tests
 
-| Platform | Command | Test Report | Status |
-|----------|---------|-------------|--------|
-| **JVM** | `./gradlew jvmTest` | `build/reports/tests/jvmTest/index.html` | ✅ Working |
-| **JS (Node.js)** | `./gradlew jsNodeTest` | `build/reports/tests/jsNodeTest/index.html` | ✅ Working |
-| **JS (Browser)** | `./gradlew jsBrowserTest` | `build/reports/tests/jsBrowserTest/index.html` | ⚠️ Some tests fail |
-| **JS (Both)** | `./gradlew jsTest` | `build/reports/tests/jsTest/index.html` | ✅ Working |
-| **WASM (Node.js)** | `./gradlew wasmJsNodeTest` | `build/reports/tests/wasmJsNodeTest/index.html` | ✅ Working |
-| **WASM (Browser)** | `./gradlew wasmJsBrowserTest` | `build/reports/tests/wasmJsBrowserTest/index.html` | ⚠️ Some tests fail |
-| **WASM (Both)** | `./gradlew wasmJsTest` | `build/reports/tests/wasmJsTest/index.html` | ✅ Working |
-| **Windows Native** | `./gradlew mingwX64Test` | `build/reports/tests/mingwX64Test/index.html` | ✅ Auto-installs deps |
-| **Linux Native** | `./gradlew linuxX64Test` | `build/reports/tests/linuxX64Test/index.html` | ⚠️ Manual install |
-| **Linux (via WSL)** | `./gradlew linuxX64TestInWSL` | `build/reports/tests/linuxX64Test/index.html` | ⚠️ Manual install |
-| **Working targets** | `./gradlew jvmTest jsNodeTest wasmJsNodeTest` | Multiple reports | ✅ Recommended |
+| Platform              | Command                                                     | Test Report                                        | Notes                        |
+|-----------------------|-------------------------------------------------------------|----------------------------------------------------|------------------------------|
+| **All (recommended)** | `./gradlew allTests  -x jsBrowserTest -x wasmJsBrowserTest` | Multiple reports                                   | Runs stable subset           |
+| **JVM**               | `./gradlew jvmTest`                                         | `build/reports/tests/jvmTest/index.html`           |                              |
+| **JS (Node.js)**      | `./gradlew jsNodeTest`                                      | `build/reports/tests/jsNodeTest/index.html`        |                              |
+| **JS (Browser)**      | `./gradlew jsBrowserTest`                                   | `build/reports/tests/jsBrowserTest/index.html`     | Some tests fail (CORS)       |
+| **JS (Both)**         | `./gradlew jsTest`                                          | `build/reports/tests/jsTest/index.html`            |                              |
+| **WASM (Node.js)**    | `./gradlew wasmJsNodeTest`                                  | `build/reports/tests/wasmJsNodeTest/index.html`    |                              |
+| **WASM (Browser)**    | `./gradlew wasmJsBrowserTest`                               | `build/reports/tests/wasmJsBrowserTest/index.html` | Some tests fail (CORS)       |
+| **WASM (Both)**       | `./gradlew wasmJsTest`                                      | `build/reports/tests/wasmJsTest/index.html`        |                              |
+| **Windows Native**    | `./gradlew mingwX64Test`                                    | `build/reports/tests/mingwX64Test/index.html`      |                              |
+| **Linux Native**      | `./gradlew linuxX64Test`                                    | `build/reports/tests/linuxX64Test/index.html`      | Skipped on Windows (use WSL) |
+| **Linux (via WSL)**   | `./gradlew linuxX64TestInWSL`                               | `build/reports/tests/linuxX64Test/index.html`      | May fail and prompt install  |
 
 **Notes:**
 - ✅ **Fully working platforms**: JVM, JavaScript (Node.js), WASM (Node.js)
+- ❌ **Failing platforms**: Native Windows (mingwX64), Native Linux (linuxX64) - see linking issues below.
 - ⚠️ Browser tests have CORS/networking issues when accessing external registries
-- 💡 Use `./gradlew jvmTest jsNodeTest wasmJsNodeTest` to run all working tests
+- 💡 Use `./gradlew allTests -x mingwX64Test -x linuxX64Test -x jsBrowserTest -x wasmJsBrowserTest` for the stable full-suite entrypoint
+
+### Unfixed Failures (Verified 2026-03-20)
+
+- **Native Linking Errors**: Both `mingwX64` and `linuxX64` targets fail to link on the current Windows environment.
+  - `mingwX64`: Fails because MSYS2 is not found (required for `pacman` to install OpenSSL).
+  - `linuxX64`: Fails with `undefined reference to 'EVP_MD_CTX_new'` and similar OpenSSL symbols. The Kotlin Native cross-compiler on Windows fails to correctly link against WSL's `libssl`.
 
 ## Building
 

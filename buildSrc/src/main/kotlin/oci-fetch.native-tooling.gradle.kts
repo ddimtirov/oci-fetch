@@ -90,12 +90,12 @@ tasks.register<Exec>("linuxX64TestInWSL") {
     commandLine("wsl", "bash", "-c", wslPath)
 }
 
-tasks.named("compileKotlinLinuxX64") {
+tasks.named { it == "compileKotlinLinuxX64" }.configureEach {
     if (isWindows) {
         dependsOn("checkWslOpenSSL")
     }
 }
 
-tasks.named("compileKotlinMingwX64") {
+tasks.named { it == "compileKotlinMingwX64" }.configureEach {
     dependsOn("installMingwOpenSSL")
 }
