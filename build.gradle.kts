@@ -57,7 +57,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         jvmMain.dependencies {
-            implementation(libs.ktor.client.java)
+            implementation(libs.ktor.client.cio)
             implementation(libs.logback.classic)
         }
         jvmTest.dependencies {
@@ -71,7 +71,7 @@ kotlin {
             implementation(libs.ktor.client.js)
         }
         nativeMain.dependencies {
-            implementation(libs.ktor.client.curl)
+            implementation(libs.ktor.client.cio)
         }
     }
 }

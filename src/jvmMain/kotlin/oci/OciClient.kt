@@ -1,14 +1,14 @@
 package oci
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.java.Java
+import io.ktor.client.engine.cio.CIO
 import io.ktor.client.statement.HttpResponse
 
 /**
- * JVM implementation of OciClient using Java HTTP client engine.
+ * JVM implementation of OciClient using Ktor CIO HTTP client engine.
  */
 actual class OciClient actual constructor() {
-    private val impl = OciClientImpl(HttpClient(Java))
+    private val impl = OciClientImpl(HttpClient(CIO))
 
     actual suspend fun fetchManifest(image: ImageRef): HttpResponse {
         return impl.fetchManifest(image)

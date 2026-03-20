@@ -4,11 +4,11 @@ A Kotlin Multiplatform library for fetching OCI (Open Container Initiative) imag
 
 ## Supported Platforms
 
-- **JVM** - Uses Java HTTP client (✅ Tested & Working)
-- **JavaScript** - Uses JS fetch API (✅ Tested & Working in Node.js)
-- **WASM-JS** - Uses JS fetch API (✅ Tested & Working in Node.js)
-- **Native Windows (mingwX64)** - ❌ Fails to link on current Windows environment (Missing MSYS2/OpenSSL)
-- **Native Linux (linuxX64)** - ❌ Fails to link on current Windows environment (Toolchain/OpenSSL issues)
+- **JVM** - Uses Ktor CIO engine (✅ Tested & Working)
+- **JavaScript** - Uses Ktor JS fetch engine (✅ Tested & Working in Node.js)
+- **WASM-JS** - Uses Ktor JS fetch engine (✅ Tested & Working in Node.js)
+- **Native Windows (mingwX64)** - Uses Ktor CIO engine (✅ Tested & Working)
+- **Native Linux (linuxX64)** - Uses Ktor CIO engine (✅ Tested & Working)
 
 ## Running Tests
 
@@ -27,16 +27,9 @@ A Kotlin Multiplatform library for fetching OCI (Open Container Initiative) imag
 | **Linux (via WSL)**   | `./gradlew linuxX64TestInWSL`                               | `build/reports/tests/linuxX64Test/index.html`      | May fail and prompt install  |
 
 **Notes:**
-- ✅ **Fully working platforms**: JVM, JavaScript (Node.js), WASM (Node.js)
-- ❌ **Failing platforms**: Native Windows (mingwX64), Native Linux (linuxX64) - see linking issues below.
+- ✅ **Fully working platforms**: JVM, JavaScript (Node.js), WASM (Node.js), Native Windows (mingwX64), Native Linux (linuxX64)
 - ⚠️ Browser tests have CORS/networking issues when accessing external registries
-- 💡 Use `./gradlew allTests -x mingwX64Test -x linuxX64Test -x jsBrowserTest -x wasmJsBrowserTest` for the stable full-suite entrypoint
-
-### Unfixed Failures (Verified 2026-03-20)
-
-- **Native Linking Errors**: Both `mingwX64` and `linuxX64` targets fail to link on the current Windows environment.
-  - `mingwX64`: Fails because MSYS2 is not found (required for `pacman` to install OpenSSL).
-  - `linuxX64`: Fails with `undefined reference to 'EVP_MD_CTX_new'` and similar OpenSSL symbols. The Kotlin Native cross-compiler on Windows fails to correctly link against WSL's `libssl`.
+- 💡 Use `./gradlew allTests -x jsBrowserTest -x wasmJsBrowserTest` for the stable full-suite entrypoint
 
 ## Building
 
@@ -94,67 +87,15 @@ suspend fun main() {
 The library uses Kotlin Multiplatform's expect/actual mechanism:
 - **Common code** (`commonMain`) contains shared business logic
 - **Platform-specific code** provides HTTP client implementations:
-  - JVM: `io.ktor:ktor-client-java`
+  - JVM: `io.ktor:ktor-client-cio`
   - JS/WASM: `io.ktor:ktor-client-js`
-  - Native: `io.ktor:ktor-client-curl`
+  - Native: `io.ktor:ktor-client-cio`
 
 ## Known Limitations
 
 ### Native Platforms (Windows/Linux)
 
-Native platforms use the **Curl engine** which requires OpenSSL libraries.
-
-#### Windows (mingwX64)
-
-**Automatic Installation**: OpenSSL for MinGW-w64 is **automatically installed** via MSYS2 pacman during Windows native builds (no sudo/elevation required).
-
-**Prerequisites**: [MSYS2](https://www.msys2.org/) must be installed.
-
-The build will automatically:
-1. Detect MSYS2 installation
-2. Install `mingw-w64-x86_64-openssl` package if needed
-3. Proceed with compilation
-
-If MSYS2 is not found, you'll get an error with installation instructions.
-
-**Manual installation**:
-```bash
-# In MSYS2 terminal
-pacman -S mingw-w64-x86_64-openssl
-```
-
-#### Linux (linuxX64) on Windows via WSL
-
-**Manual Installation Required**: The build will check for OpenSSL libraries and fail with instructions if missing.
-
-Install OpenSSL in WSL:
-```bash
-wsl sudo apt-get update
-wsl sudo apt-get install -y libssl-dev libcrypto++-dev
-```
-
-Or for other distributions:
-```bash
-# Fedora/RHEL
-wsl sudo dnf install openssl-devel
-
-# Arch
-wsl sudo pacman -S openssl
-```
-
-#### Linux (linuxX64) on Native Linux
-
-Install OpenSSL development libraries:
-```bash
-# Ubuntu/Debian
-sudo apt-get install libssl-dev libcrypto++-dev
-
-# Fedora/RHEL
-sudo dnf install openssl-devel
-
-# Arch
-sudo pacman -S openssl
-```
+Native platforms use the **CIO engine** which is written in Kotlin and has no external dependencies. No additional prerequisites (like OpenSSL or MSYS2) are needed beyond a standard Kotlin Native toolchain.
 
 ### Browser Tests
 

@@ -2,7 +2,7 @@ package example
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.engine.java.Java
+import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.runBlocking
@@ -17,7 +17,7 @@ import kotlinx.coroutines.runBlocking
 fun main() = runBlocking {
     val url = System.getProperty("url") ?: "https://httpbin.org/json"
 
-    HttpClient(Java).use { client ->
+    HttpClient(CIO).use { client ->
         val response = client.get(url)
         val body = response.bodyAsText()
         println(body)
