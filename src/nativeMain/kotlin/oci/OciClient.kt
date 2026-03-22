@@ -1,15 +1,15 @@
 package oci
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.curl.Curl
 import io.ktor.client.statement.HttpResponse
 
 /**
- * Native implementation of OciClient using Ktor CIO engine.
+ * Native implementation of OciClient using Ktor Curl engine.
  * Supports Windows (mingwX64) and Linux (linuxX64) targets.
  */
 actual class OciClient actual constructor() {
-    private val impl = OciClientImpl(HttpClient(CIO))
+    private val impl = OciClientImpl(HttpClient(Curl))
 
     actual suspend fun fetchManifest(image: ImageRef): HttpResponse {
         return impl.fetchManifest(image)
