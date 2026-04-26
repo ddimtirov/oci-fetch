@@ -11,6 +11,10 @@ import kotlinx.serialization.json.JsonObject
 actual class OciClient actual constructor() {
     private val impl = OciClientImpl(HttpClient(Js))
 
+    actual suspend fun fetchUrl(url: String): HttpResponse {
+        return impl.fetchUrl(url)
+    }
+
     actual suspend fun fetchManifest(image: ImageRef): HttpResponse {
         return impl.fetchManifest(image)
     }

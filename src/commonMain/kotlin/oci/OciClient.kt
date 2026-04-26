@@ -22,6 +22,11 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 expect class OciClient() {
     /**
+     * Fetches the given URL using OCI-compatible authentication if needed.
+     */
+    suspend fun fetchUrl(url: String): HttpResponse
+
+    /**
      * Fetches the manifest for the given image reference.
      */
     suspend fun fetchManifest(image: ImageRef): HttpResponse
@@ -122,6 +127,10 @@ internal class OciClientImpl(private val client: HttpClient) {
     suspend fun fetchManifest(image: ImageRef): HttpResponse {
         val url = "https://${image.registry}/v2/${image.repository}/manifests/${image.reference}"
         return authorizedGet(url, acceptManifest)
+    }
+
+    suspend fun fetchUrl(url: String): HttpResponse {
+        return authorizedGet(url)
     }
 
     suspend fun fetchTags(repository: String): HttpResponse {

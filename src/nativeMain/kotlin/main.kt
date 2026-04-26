@@ -505,6 +505,42 @@ class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = 
 }
 
 /**
+ * Command to fetch a URL with OCI authentication.
+ */
+class GetCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "get") {
+    override fun help(context: Context): String = "Get the url but supports the anonymous auth methods of container registries"
+    val url by argument(help = "The URL to fetch")
+
+    @OptIn(ExperimentalForeignApi::class)
+    override fun run() {
+        runBlocking {
+            val raw = globalRaw()
+            val client = OciClient()
+            try {
+                val response = client.fetchUrl(url)
+                val body = response.bodyAsText()
+                if (raw) {
+                    println(body)
+                } else {
+                    try {
+                        val json = Json.parseToJsonElement(body)
+                        val prettyJson = Json { prettyPrint = true }
+                        println(prettyJson.encodeToString(JsonElement.serializer(), json))
+                    } catch (e: Exception) {
+                        // Not JSON, just print body
+                        println(body)
+                    }
+                }
+            } catch (e: Exception) {
+                fprintf(stderr, "Error: %s\n", e.message ?: "Unknown error")
+            } finally {
+                client.close()
+            }
+        }
+    }
+}
+
+/**
  * Command to list tags for a repository.
  */
 class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "tags") {
@@ -537,11 +573,12 @@ class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "t
 
 fun main(args: Array<String>) {
     val ociFetch = OciFetch()
+    val getCommand = GetCommand(globalRaw = { ociFetch.raw })
     val tagsCommand = TagsCommand(globalRaw = { ociFetch.raw })
     val metaCommand = MetaCommand()
     val indexCommand = IndexCommand(globalRaw = { ociFetch.raw })
     val manifestCommand = ManifestCommand(globalRaw = { ociFetch.raw })
     val configCommand = ConfigCommand(globalRaw = { ociFetch.raw })
     metaCommand.subcommands(indexCommand, manifestCommand, configCommand)
-    ociFetch.subcommands(tagsCommand, metaCommand).main(args)
+    ociFetch.subcommands(getCommand, tagsCommand, metaCommand).main(args)
 }
