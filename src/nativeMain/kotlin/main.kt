@@ -11,7 +11,10 @@ import kotlinx.serialization.json.*
 import kotlin.io.println
 import platform.posix.fprintf
 import platform.posix.stderr
-import kotlinx.cinterop.ExperimentalForeignApi
+import platform.posix.fgets
+import platform.posix.stdin
+import platform.posix.feof
+import kotlinx.cinterop.*
 
 /**
  * Main command for oci-fetch executable.
@@ -63,20 +66,7 @@ class IndexCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "
                     if (raw) {
                         println(body)
                     } else {
-                        val manifests = json["manifests"]?.jsonArray
-                        println("digest\tmediaType\tos\tarchitecture\tos.version\tos.features\tvariant")
-                        manifests?.forEach { entry ->
-                            val obj = entry.jsonObject
-                            val digest = obj["digest"]?.jsonPrimitive?.content ?: ""
-                            val mediaType = obj["mediaType"]?.jsonPrimitive?.content ?: ""
-                            val platform = obj["platform"]?.jsonObject
-                            val os = platform?.get("os")?.jsonPrimitive?.content ?: ""
-                            val arch = platform?.get("architecture")?.jsonPrimitive?.content ?: ""
-                            val osVer = platform?.get("os.version")?.jsonPrimitive?.content ?: ""
-                            val osFeat = platform?.get("os.features")?.jsonArray?.joinToString(",") { it.jsonPrimitive.content } ?: ""
-                            val variant = platform?.get("variant")?.jsonPrimitive?.content ?: ""
-                            println("$digest\t$mediaType\t$os\t$arch\t$osVer\t$osFeat\t$variant")
-                        }
+                        printTsvIndex(body)
                     }
                 } else if (!isManifest) {
                     fprintf(stderr, "Error: Format error: Reference points to neither an index nor a manifest (Content-Type: %s)\n", contentType)
@@ -108,6 +98,30 @@ class IndexCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "
             }
         }
     }
+}
+
+fun printTsvIndex(body: String) {
+    val json = Json.parseToJsonElement(body).jsonObject
+    val manifests = json["manifests"]?.jsonArray
+    println("digest\tmediaType\tos\tarchitecture\tos.version\tos.features\tvariant")
+    manifests?.forEach { entry ->
+        val obj = entry.jsonObject
+        val digest = obj["digest"]?.jsonPrimitive?.content ?: ""
+        val mediaType = obj["mediaType"]?.jsonPrimitive?.content ?: ""
+        val platform = obj["platform"]?.jsonObject
+        val os = platform?.get("os")?.jsonPrimitive?.content ?: ""
+        val arch = platform?.get("architecture")?.jsonPrimitive?.content ?: ""
+        val osVer = platform?.get("os.version")?.jsonPrimitive?.content ?: ""
+        val osFeat = platform?.get("os.features")?.jsonArray?.joinToString(",") { it.jsonPrimitive.content } ?: ""
+        val variant = platform?.get("variant")?.jsonPrimitive?.content ?: ""
+        println("$digest\t$mediaType\t$os\t$arch\t$osVer\t$osFeat\t$variant")
+    }
+}
+
+fun printPrettyConfig(body: String) {
+    val prettyJson = Json { prettyPrint = true }
+    val configElement = Json.parseToJsonElement(body)
+    println(prettyJson.encodeToString(JsonElement.serializer(), configElement))
 }
 
 fun printTsvManifest(body: String) {
@@ -461,9 +475,7 @@ class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = 
                     if (raw) {
                         println(configBody)
                     } else {
-                        val prettyJson = Json { prettyPrint = true }
-                        val configElement = Json.parseToJsonElement(configBody)
-                        println(prettyJson.encodeToString(JsonElement.serializer(), configElement))
+                        printPrettyConfig(configBody)
                     }
                     return@runBlocking
                 } else if (isConfig) {
@@ -471,8 +483,7 @@ class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = 
                     if (raw) {
                         println(body)
                     } else {
-                        val prettyJson = Json { prettyPrint = true }
-                        println(prettyJson.encodeToString(JsonElement.serializer(), json))
+                        printPrettyConfig(body)
                     }
                     return@runBlocking
                 } else {
@@ -491,9 +502,7 @@ class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = 
                 if (raw) {
                     println(configBody)
                 } else {
-                    val prettyJson = Json { prettyPrint = true }
-                    val configElement = Json.parseToJsonElement(configBody)
-                    println(prettyJson.encodeToString(JsonElement.serializer(), configElement))
+                    printPrettyConfig(configBody)
                 }
             } catch (e: Exception) {
                 fprintf(stderr, "Error: %s\n", e.message ?: "Unknown error")
@@ -571,6 +580,64 @@ class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "t
     }
 }
 
+@OptIn(ExperimentalForeignApi::class)
+fun readStdin(): String = buildString {
+    memScoped {
+        val bufferSize = 4096
+        val buffer = allocArray<ByteVar>(bufferSize)
+        while (feof(stdin) == 0) {
+            val result = fgets(buffer, bufferSize, stdin)
+            if (result != null) {
+                append(result.toKString())
+            }
+        }
+    }
+}
+
+/**
+ * Command for parse subcommands.
+ */
+class ParseCommand : CliktCommand(name = "parse") {
+    override fun help(context: Context): String = "Parse and pretty-print OCI objects from stdin"
+    override fun run() = Unit
+}
+
+class ParseIndexCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "index") {
+    override fun help(context: Context): String = "Parse an index from stdin"
+    override fun run() {
+        if (globalRaw()) {
+            throw UsageError("--raw is not supported for parse command")
+        }
+        val input = readStdin()
+        if (input.isBlank()) return
+        printTsvIndex(input)
+    }
+}
+
+class ParseManifestCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "manifest") {
+    override fun help(context: Context): String = "Parse a manifest from stdin"
+    override fun run() {
+        if (globalRaw()) {
+            throw UsageError("--raw is not supported for parse command")
+        }
+        val input = readStdin()
+        if (input.isBlank()) return
+        printTsvManifest(input)
+    }
+}
+
+class ParseConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "config") {
+    override fun help(context: Context): String = "Parse a config from stdin"
+    override fun run() {
+        if (globalRaw()) {
+            throw UsageError("--raw is not supported for parse command")
+        }
+        val input = readStdin()
+        if (input.isBlank()) return
+        printPrettyConfig(input)
+    }
+}
+
 fun main(args: Array<String>) {
     val ociFetch = OciFetch()
     val getCommand = GetCommand(globalRaw = { ociFetch.raw })
@@ -580,5 +647,13 @@ fun main(args: Array<String>) {
     val manifestCommand = ManifestCommand(globalRaw = { ociFetch.raw })
     val configCommand = ConfigCommand(globalRaw = { ociFetch.raw })
     metaCommand.subcommands(indexCommand, manifestCommand, configCommand)
-    ociFetch.subcommands(getCommand, tagsCommand, metaCommand).main(args)
+
+    val parseCommand = ParseCommand()
+    parseCommand.subcommands(
+        ParseIndexCommand(globalRaw = { ociFetch.raw }),
+        ParseManifestCommand(globalRaw = { ociFetch.raw }),
+        ParseConfigCommand(globalRaw = { ociFetch.raw })
+    )
+
+    ociFetch.subcommands(getCommand, tagsCommand, metaCommand, parseCommand).main(args)
 }
