@@ -3,6 +3,7 @@ package oci
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.curl.Curl
 import io.ktor.client.statement.HttpResponse
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Native implementation of OciClient using Ktor Curl engine.
@@ -21,6 +22,10 @@ actual class OciClient actual constructor() {
 
     actual suspend fun fetchTags(repository: String): HttpResponse {
         return impl.fetchTags(repository)
+    }
+
+    actual fun isIndexContent(contentType: String, json: JsonObject?): Boolean {
+        return impl.isIndexContent(contentType, json)
     }
 
     actual fun close() {

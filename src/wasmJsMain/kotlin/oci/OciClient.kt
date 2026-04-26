@@ -3,6 +3,7 @@ package oci
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.js.Js
 import io.ktor.client.statement.HttpResponse
+import kotlinx.serialization.json.JsonObject
 
 /**
  * WASM-JS implementation of OciClient using JS fetch API.
@@ -20,6 +21,10 @@ actual class OciClient actual constructor() {
 
     actual suspend fun fetchTags(repository: String): HttpResponse {
         return impl.fetchTags(repository)
+    }
+
+    actual fun isIndexContent(contentType: String, json: JsonObject?): Boolean {
+        return impl.isIndexContent(contentType, json)
     }
 
     actual fun close() {

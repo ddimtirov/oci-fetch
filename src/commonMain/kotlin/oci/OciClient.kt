@@ -38,6 +38,11 @@ expect class OciClient() {
     suspend fun fetchTags(repository: String): HttpResponse
 
     /**
+     * Determines if the given content type and JSON body represent an OCI index or manifest list.
+     */
+    fun isIndexContent(contentType: String, json: JsonObject?): Boolean
+
+    /**
      * Closes the underlying HTTP client.
      */
     fun close()
