@@ -6,8 +6,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.headers
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpStatusCode
+import io.ktor.http.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -20,7 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * 
  * Multiplatform implementation supporting JVM, JS, Native (Windows/Linux), and WASM.
  */
-expect class OciClient() {
+expect class OciClient() : AutoCloseable {
     /**
      * Fetches the given URL using OCI-compatible authentication if needed.
      */
@@ -43,14 +42,30 @@ expect class OciClient() {
     suspend fun fetchTags(repository: String): HttpResponse
 
     /**
+     * Fetches tags for the given repository and returns them as a list of strings.
+     */
+    suspend fun fetchTagsList(repository: String): List<String>
+
+    /**
      * Determines if the given content type and JSON body represent an OCI index or manifest list.
      */
     fun isIndexContent(contentType: String, json: JsonObject?): Boolean
 
     /**
+     * Determines if the given JSON body represents an OCI manifest.
+     */
+    fun isManifestContent(json: JsonObject?): Boolean
+
+    /**
      * Closes the underlying HTTP client.
      */
-    fun close()
+    override fun close()
+
+    /**
+     * Resolves an image reference to a specific manifest based on platform constraints.
+     * If the reference is an index, it follows it using the selector.
+     */
+    suspend fun resolveManifest(image: ImageRef, selector: PlatformSelector): ManifestResolution
 
     companion object {
         /**
@@ -60,6 +75,16 @@ expect class OciClient() {
         fun parseRef(spec: String, defaultTag: String = "latest"): ImageRef
     }
 }
+
+/**
+ * Result of manifest resolution.
+ */
+data class ManifestResolution(
+    val body: String,
+    val digest: String,
+    val contentType: String,
+    val imageRef: ImageRef
+)
 
 /**
  * Image reference containing registry, repository, and tag/digest.
@@ -141,6 +166,16 @@ internal class OciClientImpl(private val client: HttpClient) {
         val name = parts.getOrNull(1) ?: ""
         val url = "https://$registry/v2/$name/tags/list"
         return authorizedGet(url)
+    }
+
+    suspend fun fetchTagsList(repository: String): List<String> {
+        val response = fetchTags(repository)
+        if (response.status != HttpStatusCode.OK) {
+            throw Exception("Failed to fetch tags: ${response.status}")
+        }
+        val body = response.bodyAsText()
+        val json = Json.parseToJsonElement(body).jsonObject
+        return json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
     }
 
     suspend fun authorizedGet(url: String, acceptHeader: String? = null): HttpResponse {
@@ -229,6 +264,8 @@ internal class OciClientImpl(private val client: HttpClient) {
         return hasManifests
     }
 
+    fun isManifestContent(json: JsonObject?): Boolean = json != null && (json.containsKey("layers") || json.containsKey("config"))
+
     suspend fun fetchBearerToken(params: Map<String, String>): String? {
         val realm = params["realm"] ?: return null
         // Preserve service and scope; commonly included in the 401 challenge
@@ -270,6 +307,96 @@ internal class OciClientImpl(private val client: HttpClient) {
 
     fun close() {
         client.close()
+    }
+
+    suspend fun resolveManifest(image: ImageRef, selector: PlatformSelector): ManifestResolution {
+        val response = fetchManifest(image)
+        if (!response.status.isSuccess()) {
+            throw Exception("Failed to fetch manifest: ${response.status}")
+        }
+
+        val body = response.bodyAsText()
+        val contentType = response.headers[HttpHeaders.ContentType] ?: ""
+        val json = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull()
+
+        val isIndex = isIndexContent(contentType, json)
+        val isManifest = json?.let { it.containsKey("layers") || it.containsKey("config") } ?: false
+
+        if (isIndex && json != null) {
+            val manifests = json["manifests"]?.jsonArray
+            val matches = manifests?.filter { entry ->
+                selector.matches(entry.jsonObject["platform"]?.jsonObject)
+            } ?: emptyList()
+
+            if (matches.isEmpty()) {
+                throw Exception("No manifest found matching the specified constraints")
+            }
+
+            if (matches.size > 1) {
+                val options = matches.mapNotNull { entry ->
+                    val platform = entry.jsonObject["platform"]?.jsonObject ?: return@mapNotNull null
+                    val arch = platform["architecture"]?.jsonPrimitive?.content ?: ""
+                    val osName = platform["os"]?.jsonPrimitive?.content ?: ""
+                    val osVer = platform["os.version"]?.jsonPrimitive?.content
+                    val variantStr = platform["variant"]?.jsonPrimitive?.content
+                    val features = platform["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+
+                    if (arch == "unknown" || osName == "unknown") return@mapNotNull null
+
+                    buildString {
+                        append("--architecture $arch --os $osName")
+                        if (osVer != null) append(" --os-version $osVer")
+                        if (variantStr != null) append(" --variant $variantStr")
+                        features.forEach { append(" --os-features $it") }
+                    }
+                }.distinct().joinToString("\n")
+                throw Exception("Multiple manifests found matching the specified constraints\n\n$options")
+            }
+
+            val selectedEntry = matches[0].jsonObject
+            val selectedDigest = selectedEntry["digest"]?.jsonPrimitive?.content
+                ?: throw Exception("Selected manifest entry has no digest")
+
+            val manifestRef = image.copy(reference = selectedDigest)
+            val manifestResponse = fetchManifest(manifestRef)
+            if (!manifestResponse.status.isSuccess()) {
+                throw Exception("Failed to fetch matched manifest: ${manifestResponse.status}")
+            }
+
+            return ManifestResolution(
+                body = manifestResponse.bodyAsText(),
+                digest = selectedDigest,
+                contentType = manifestResponse.headers[HttpHeaders.ContentType] ?: "",
+                imageRef = manifestRef
+            )
+        } else if (isManifest && json != null) {
+            // Already a manifest, check constraints
+            val configDigest = json["config"]?.jsonObject?.get("digest")?.jsonPrimitive?.content
+            if (selector.hasConstraints()) {
+                if (configDigest == null) {
+                    throw Exception("Reference points to a manifest but it lacks platform information to verify constraints")
+                }
+                
+                val artifacts = fetchArtifacts(image)
+                val configBody = artifacts.configs.firstOrNull()
+                if (configBody.isNullOrBlank()) {
+                    throw Exception("Could not fetch config to verify platform constraints")
+                }
+                val configJson = Json.parseToJsonElement(configBody).jsonObject
+                if (!selector.matches(configJson)) {
+                    throw Exception("Manifest does not match platform constraints")
+                }
+            }
+            
+            return ManifestResolution(
+                body = body,
+                digest = response.headers["Docker-Content-Digest"] ?: configDigest ?: "",
+                contentType = contentType,
+                imageRef = image
+            )
+        } else {
+            throw Exception("Reference points to neither an index nor a manifest (Content-Type: $contentType)")
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 package oci
 
-import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.*
+import io.ktor.http.*
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -49,13 +50,12 @@ class OciClientTest {
     @Test
     fun testFetchManifest_alpine() = runTest {
         if (isBrowser() || isNative()) return@runTest
-        val client = OciClient()
-        try {
+        OciClient().use { client ->
             val ref = OciClient.parseRef("registry-1.docker.io/library/alpine:latest")
             val response = client.fetchManifest(ref)
-            
-            assertTrue(response.status.value in 200..299, "Expected successful response")
-            
+
+            assertTrue(response.status.isSuccess(), "Expected successful response")
+
             // Parse and validate manifest structure
             val body = response.bodyAsText()
             assertNotNull(body)
@@ -63,8 +63,6 @@ class OciClientTest {
             val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
             assertNotNull(schemaVersion)
             assertTrue(schemaVersion == 1 || schemaVersion == 2)
-        } finally {
-            client.close()
         }
     }
     @Test
@@ -97,13 +95,12 @@ class OciClientTest {
             "registry-1.docker.io/library/nginx"
         )
         for (spec in images) {
-            val client = OciClient()
-            try {
+            OciClient().use { client ->
                 val ref = OciClient.parseRef(spec)
                 val resp = client.fetchManifest(ref)
                 val body = runCatching { resp.bodyAsText() }.getOrNull()
 
-                if (resp.status.value != 200) {
+                if (!resp.status.isSuccess()) {
                     val headers = resp.headers.entries().joinToString("\n") { (k, v) -> "$k: ${v.joinToString()}" }
                     val msg = buildString {
                         appendLine("Failed for $spec")
@@ -120,8 +117,6 @@ class OciClientTest {
                 val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
                 assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec")
                 assertTrue(schemaVersion == 1 || schemaVersion == 2, "Unexpected schemaVersion=$schemaVersion for $spec")
-            } finally {
-                client.close()
             }
         }
     }

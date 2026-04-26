@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonObject
  * Native implementation of OciClient using Ktor Curl engine.
  * Supports Windows (mingwX64) and Linux (linuxX64) targets.
  */
-actual class OciClient actual constructor() {
+actual class OciClient actual constructor() : AutoCloseable {
     private val impl = OciClientImpl(HttpClient(Curl))
 
     actual suspend fun fetchUrl(url: String): HttpResponse {
@@ -28,12 +28,24 @@ actual class OciClient actual constructor() {
         return impl.fetchTags(repository)
     }
 
+    actual suspend fun fetchTagsList(repository: String): List<String> {
+        return impl.fetchTagsList(repository)
+    }
+
     actual fun isIndexContent(contentType: String, json: JsonObject?): Boolean {
         return impl.isIndexContent(contentType, json)
     }
 
-    actual fun close() {
+    actual fun isManifestContent(json: JsonObject?): Boolean {
+        return impl.isManifestContent(json)
+    }
+
+    actual override fun close() {
         impl.close()
+    }
+
+    actual suspend fun resolveManifest(image: ImageRef, selector: PlatformSelector): ManifestResolution {
+        return impl.resolveManifest(image, selector)
     }
 
     actual companion object {
