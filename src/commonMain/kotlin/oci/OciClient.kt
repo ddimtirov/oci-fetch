@@ -19,62 +19,89 @@ import kotlinx.serialization.json.jsonPrimitive
  * 
  * Multiplatform implementation supporting JVM, JS, Native (Windows/Linux), and WASM.
  */
-expect class OciClient() : AutoCloseable {
+class OciClient(private val httpClient: HttpClient = createHttpClient()) : AutoCloseable {
+    private val impl = OciClientImpl(httpClient)
+
     /**
      * Fetches the given URL using OCI-compatible authentication if needed.
      */
-    suspend fun fetchUrl(url: String): HttpResponse
+    suspend fun fetchUrl(url: String): HttpResponse {
+        return impl.fetchUrl(url)
+    }
 
     /**
      * Fetches the manifest for the given image reference.
      */
-    suspend fun fetchManifest(image: ImageRef): HttpResponse
+    suspend fun fetchManifest(image: ImageRef): HttpResponse {
+        return impl.fetchManifest(image)
+    }
 
     /**
      * Fetches manifest/index, image manifests, and matching configs.
      * Keeps JSON bodies as text; parses minimally to discover digests.
      */
-    suspend fun fetchArtifacts(image: ImageRef): FetchedArtifacts
+    suspend fun fetchArtifacts(image: ImageRef): FetchedArtifacts {
+        return impl.fetchArtifacts(image)
+    }
 
     /**
      * Fetches tags for the given repository.
      */
-    suspend fun fetchTags(repository: String): HttpResponse
+    suspend fun fetchTags(repository: String): HttpResponse {
+        return impl.fetchTags(repository)
+    }
 
     /**
      * Fetches tags for the given repository and returns them as a list of strings.
      */
-    suspend fun fetchTagsList(repository: String): List<String>
+    suspend fun fetchTagsList(repository: String): List<String> {
+        return impl.fetchTagsList(repository)
+    }
 
     /**
      * Determines if the given content type and JSON body represent an OCI index or manifest list.
      */
-    fun isIndexContent(contentType: String, json: JsonObject?): Boolean
+    fun isIndexContent(contentType: String, json: JsonObject?): Boolean {
+        return impl.isIndexContent(contentType, json)
+    }
 
     /**
      * Determines if the given JSON body represents an OCI manifest.
      */
-    fun isManifestContent(json: JsonObject?): Boolean
+    fun isManifestContent(json: JsonObject?): Boolean {
+        return impl.isManifestContent(json)
+    }
 
     /**
      * Closes the underlying HTTP client.
      */
-    override fun close()
+    override fun close() {
+        impl.close()
+    }
 
     /**
      * Resolves an image reference to a specific manifest based on platform constraints.
      * If the reference is an index, it follows it using the selector.
      */
-    suspend fun resolveManifest(image: ImageRef, selector: PlatformSelector): ManifestResolution
+    suspend fun resolveManifest(image: ImageRef, selector: PlatformSelector): ManifestResolution {
+        return impl.resolveManifest(image, selector)
+    }
 
     companion object {
         /**
          * Parses an image reference string into an ImageRef.
          * Example: registry-1.docker.io/library/alpine:latest
          */
-        fun parseRef(spec: String, defaultTag: String = "latest"): ImageRef
+        fun parseRef(spec: String, defaultTag: String = "latest"): ImageRef {
+            return OciClientImpl.parseRef(spec, defaultTag)
+        }
     }
 }
+
+/**
+ * Creates a platform-specific HttpClient engine.
+ */
+expect fun createHttpClient(): HttpClient
 
 /**
  * Result of manifest resolution.
