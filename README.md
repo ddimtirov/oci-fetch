@@ -90,6 +90,37 @@ oci-fetch --help
 oci-fetch tags --help
 ```
 
+### Referrers, Signatures, and SBOMs
+
+The `meta referrers` command can be used to discover artifacts associated with an image, such as Cosign signatures, Notary signatures, or SBOMs.
+
+```bash
+# Find signatures for curl on Docker Hub
+oci-fetch meta referrers registry-1.docker.io/curlimages/curl:latest
+
+# Find signatures for .NET runtime on MCR
+oci-fetch meta referrers mcr.microsoft.com/dotnet/runtime:8.0
+
+# Find referrers (signatures and metadata) on GHCR
+oci-fetch meta referrers ghcr.io/stefanprodan/podinfo:latest
+
+# Find Red Hat UBI10 Minimal Cosign signatures (requires platform digest)
+# 1. Find the digest for your architecture (e.g., amd64)
+oci-fetch meta index registry.access.redhat.com/ubi10/ubi-minimal:latest
+# 2. Fetch referrers using the specific digest
+oci-fetch meta referrers registry.access.redhat.com/ubi10/ubi-minimal@sha256:b01cbd6a4c538ea1002ca774d5e09adcae15a1c095804400ea201ea5811431b1
+
+# Get raw OCI Index of referrers
+oci-fetch --raw meta referrers registry-1.docker.io/curlimages/curl:latest
+```
+
+Example output for `curlimages/curl:latest`:
+```text
+digest  artifactType    mediaType       size    annotations
+sha256:562fd503... application/vnd.dev.sigstore.bundle.v0.3+json   application/vnd.oci.image.manifest.v1+json      894     dev.sigstore.bundle.content=dsse-envelope; ...
+sha256:c7ba3d0b... application/vnd.dev.sigstore.bundle.v0.3+json   application/vnd.oci.image.manifest.v1+json      894     dev.sigstore.bundle.content=dsse-envelope; ...
+```
+
 ## Usage Example
 
 ```kotlin

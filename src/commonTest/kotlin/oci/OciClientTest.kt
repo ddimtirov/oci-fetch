@@ -84,6 +84,17 @@ class OciClientTest {
     }
 
     @Test
+    fun testIsIndexContent() {
+        OciClient().use { client ->
+            assertTrue(client.isIndexContent("application/vnd.oci.image.index.v1+json", null))
+            assertTrue(client.isIndexContent("application/vnd.docker.distribution.manifest.list.v2+json", null))
+
+            val json = Json.parseToJsonElement("""{"manifests": []}""").jsonObject
+            assertTrue(client.isIndexContent("text/plain", json))
+        }
+    }
+
+    @Test
     fun fetch_manifests_for_multiple_images_without_mocking() = runTest {
         // Skip on platforms that are known to fail in this environment (CORS in Browser, CIO TLS on Native)
         // We still run instantiation and URL encoding tests on all platforms.

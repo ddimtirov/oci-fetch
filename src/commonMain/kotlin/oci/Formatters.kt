@@ -80,6 +80,28 @@ fun formatTsvManifest(body: String): String = buildString {
 }.trimEnd()
 
 /**
+ * Formats an OCI index of referrers as TSV.
+ */
+fun formatTsvReferrers(body: String): String = buildString {
+    val json = Json.parseToJsonElement(body).jsonObject
+    val manifests = json["manifests"]?.jsonArray
+    appendLine("digest\tartifactType\tmediaType\tsize\tannotations")
+    manifests?.forEach { entry ->
+        val obj = entry.jsonObject
+        val digest = obj["digest"]?.jsonPrimitive?.content ?: ""
+        val artifactType = obj["artifactType"]?.jsonPrimitive?.content ?: ""
+        val mediaType = obj["mediaType"]?.jsonPrimitive?.content ?: ""
+        val size = obj["size"]?.jsonPrimitive?.contentOrNull ?: ""
+        
+        val annotations = obj["annotations"]?.jsonObject?.entries?.joinToString("; ") { (k, v) ->
+            "$k=${v.jsonPrimitive.content.replace("\n", " ").replace("\t", " ")}"
+        } ?: ""
+
+        appendLine("$digest\t$artifactType\t$mediaType\t$size\t$annotations")
+    }
+}.trimEnd()
+
+/**
  * Pretty-prints a JSON config.
  */
 fun formatPrettyConfig(body: String): String {

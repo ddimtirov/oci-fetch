@@ -15,9 +15,6 @@ import platform.posix.fgets
 import platform.posix.stdin
 import platform.posix.feof
 import kotlinx.cinterop.*
-import oci.OciClient
-import oci.formatPrettyConfig
-import oci.formatTsvManifest
 
 /**
  * Main command for oci-fetch executable.
@@ -26,7 +23,10 @@ class OciFetch : CliktCommand(name = "oci-fetch") {
     val raw by option("--raw", help = "Return raw JSON response").flag()
 
     override fun run() {
-        // This will be called before any subcommand
+        if (currentContext.invokedSubcommand == null) {
+            echo(getFormattedHelp())
+            platform.posix.exit(0)
+        }
     }
 }
 
@@ -51,7 +51,12 @@ class MetaCommand : CliktCommand(name = "meta") {
             variant = variant
         )
 
-    override fun run() = Unit
+    override fun run() {
+        if (currentContext.invokedSubcommand == null) {
+            echo(getFormattedHelp())
+            platform.posix.exit(0)
+        }
+    }
 }
 
 /**
@@ -94,7 +99,7 @@ class IndexCommand(
         val isIndex = client.isIndexContent(contentType, json)
         val isManifest = client.isManifestContent(json)
         check(isIndex || isManifest) { "Reference points to neither an index nor a manifest (Content-Type: $contentType)" }
-        check(!isIndex && !requireIndex) { "--fail was requested and reference points to a non-index." }
+        check(isIndex || !requireIndex) { "--fail was requested and reference points to a non-index." }
 
         if (raw) return body // pass through whatever we got, regardless of whether we recognize it as an index
 
@@ -108,6 +113,47 @@ class IndexCommand(
         }
     }
 
+}
+
+/**
+ * Command to fetch referrers for an image.
+ */
+class ReferrersCommand(
+    private val globalRaw: () -> Boolean,
+    private val meta: () -> MetaCommand? = { null }
+) : CliktCommand(name = "referrers") {
+    override fun help(context: Context): String = "Fetch referrers for an image"
+
+    val type by option("--type", help = "Filter referrers by artifact type")
+    val scrape by option("--scrape", help = "Force scrape mode: regex used to discover referrers by scraping tags")
+    val ref by argument(help = "The OCI image reference (e.g., registry-1.docker.io/library/alpine:latest)")
+
+    @OptIn(ExperimentalForeignApi::class)
+    override fun run() {
+        val selector = meta()?.platformSelector ?: PlatformSelector()
+
+        runBlocking {
+            val raw = globalRaw()
+            val output = OciClient().use { client ->
+                val imageRef = OciClient.parseRef(ref)
+
+                val digest = when {
+                    imageRef.reference.startsWith("sha256:") -> imageRef.reference
+                    selector.hasConstraints() -> client.resolveManifest(imageRef, selector).digest
+                    else -> {
+                        val response = client.fetchManifest(imageRef)
+                        check(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
+                        response.headers["Docker-Content-Digest"]
+                            ?: ("sha256:" + sha256Hex(response.bodyAsText().encodeToByteArray()))
+                    }
+                }
+
+                val body = client.fetchReferrers(imageRef, digest, type, scrape)
+                if (raw) body else formatTsvReferrers(body)
+            }
+            println(output)
+        }
+    }
 }
 
 /**
@@ -251,7 +297,12 @@ fun readStdin(): String = buildString {
  */
 class ParseCommand : CliktCommand(name = "parse") {
     override fun help(context: Context): String = "Parse and pretty-print OCI objects from stdin"
-    override fun run() = Unit
+    override fun run() {
+        if (currentContext.invokedSubcommand == null) {
+            echo(getFormattedHelp())
+            platform.posix.exit(0)
+        }
+    }
 }
 
 class ParseFormatCommand(
@@ -287,17 +338,21 @@ fun main(args: Array<String>) {
         metaCommand.subcommands(
             IndexCommand(globalRaw = raw, meta = { metaCommand }),
             ManifestCommand(globalRaw = raw, meta = { metaCommand }),
-            ConfigCommand(globalRaw = raw, meta = { metaCommand })
+            ConfigCommand(globalRaw = raw, meta = { metaCommand }),
+            ReferrersCommand(globalRaw = raw, meta = { metaCommand })
         )
     )
 
     try {
         ociFetch.parse(args)
     } catch (e: CliktError) {
-        ociFetch.echo(e.message, err = true)
-        val exitCode = (e as? PrintHelpMessage)?.let { 0 } ?: 1
-        platform.posix.exit(exitCode)
-    } catch (e: Throwable) {
+        if (e is PrintHelpMessage) {
+            ociFetch.echo(ociFetch.getFormattedHelp())
+            platform.posix.exit(0)
+        }
+        ociFetch.echo(e.message ?: "Error: ${e::class.simpleName}", err = true)
+        platform.posix.exit(1)
+    } catch (e: Exception) {
         @OptIn(ExperimentalForeignApi::class)
         fprintf(stderr, "Error: %s\n", e.message ?: "Unknown error")
         platform.posix.exit(1)
