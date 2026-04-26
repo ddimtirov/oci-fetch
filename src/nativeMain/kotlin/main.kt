@@ -320,11 +320,18 @@ class ManifestCommand(private val globalRaw: () -> Boolean) : CliktCommand(name 
 }
 
 /**
- * Command to list tags for a repository.
+ * Command to fetch the config for a specific platform.
  */
-class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "tags") {
-    override fun help(context: Context): String = "List tags for a repository"
-    val repository by argument(help = "The OCI repository (e.g., registry-1.docker.io/library/alpine)")
+class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "config") {
+    override fun help(context: Context): String = "Fetch the config for a specific platform"
+
+    val architecture by option("--architecture", help = "The architecture of the image")
+    val os by option("--os", help = "The OS of the image")
+    val osVersion by option("--os-version", help = "The OS version of the image")
+    val osFeatures by option("--os-features", help = "The OS features of the image").multiple()
+    val variant by option("--variant", help = "The variant of the image")
+
+    val ref by argument(help = "The OCI image reference (e.g., registry-1.docker.io/library/alpine:latest)")
 
     @OptIn(ExperimentalForeignApi::class)
     override fun run() {
@@ -332,7 +339,158 @@ class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "t
             val raw = globalRaw()
             val client = OciClient()
             try {
-                val response = client.fetchTags(repository)
+                val imageRef = OciClient.parseRef(ref)
+                val response = client.fetchManifest(imageRef)
+                if (response.status.value !in 200..299) {
+                    fprintf(stderr, "Error: Failed to fetch manifest: %s\n", response.status.toString())
+                    return@runBlocking
+                }
+
+                val body = response.bodyAsText()
+                val contentType = response.headers[HttpHeaders.ContentType] ?: ""
+                val json = Json.parseToJsonElement(body).jsonObject
+
+                val manifestDigest: String
+                if (client.isIndexContent(contentType, json)) {
+                    val manifests = json["manifests"]?.jsonArray
+                    val matches = manifests?.filter { entry ->
+                        val obj = entry.jsonObject
+                        val platform = obj["platform"]?.jsonObject ?: return@filter false
+
+                        if (architecture != null && platform["architecture"]?.jsonPrimitive?.content != architecture) return@filter false
+                        if (os != null && platform["os"]?.jsonPrimitive?.content != os) return@filter false
+                        if (osVersion != null && platform["os.version"]?.jsonPrimitive?.content != osVersion) return@filter false
+                        if (variant != null && platform["variant"]?.jsonPrimitive?.content != variant) return@filter false
+                        if (osFeatures.isNotEmpty()) {
+                            val features = platform["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+                            if (!features.containsAll(osFeatures)) return@filter false
+                        }
+                        true
+                    } ?: emptyList()
+
+                    if (matches.isEmpty()) {
+                        fprintf(stderr, "Error: No manifest found matching the specified constraints\n")
+                        return@runBlocking
+                    }
+
+                    if (matches.size > 1) {
+                        val options = matches.mapNotNull { entry ->
+                            val platform = entry.jsonObject["platform"]?.jsonObject ?: return@mapNotNull null
+                            val arch = platform["architecture"]?.jsonPrimitive?.content ?: ""
+                            val osName = platform["os"]?.jsonPrimitive?.content ?: ""
+                            val osVer = platform["os.version"]?.jsonPrimitive?.content
+                            val variantStr = platform["variant"]?.jsonPrimitive?.content
+                            val features = platform["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+
+                            if (arch == "unknown" || osName == "unknown") return@mapNotNull null
+
+                            buildString {
+                                append("--architecture $arch --os $osName")
+                                if (osVer != null) append(" --os-version $osVer")
+                                if (variantStr != null) append(" --variant $variantStr")
+                                features.forEach { append(" --os-features $it") }
+                            }
+                        }.distinct().joinToString("\n")
+                        fprintf(stderr, "Error: Multiple manifests found matching the specified constraints\n\n$options\n")
+                        return@runBlocking
+                    }
+
+                    val selectedDigest = matches[0].jsonObject["digest"]?.jsonPrimitive?.content
+                    if (selectedDigest == null) {
+                        fprintf(stderr, "Error: Selected manifest entry has no digest\n")
+                        return@runBlocking
+                    }
+                    manifestDigest = selectedDigest
+                } else {
+                    // It's already a manifest. Check if it matches constraints.
+                    // We need the config to check constraints.
+                    val artifacts = client.fetchArtifacts(imageRef)
+                    val configBody = artifacts.configs.firstOrNull()
+                    
+                    if (architecture != null || os != null || osVersion != null || variant != null || osFeatures.isNotEmpty()) {
+                        if (configBody.isNullOrBlank()) {
+                            fprintf(stderr, "Error: Reference points to a manifest but it lacks platform information to verify constraints\n")
+                            return@runBlocking
+                        }
+                        val configJson = Json.parseToJsonElement(configBody).jsonObject
+                        if (architecture != null && configJson["architecture"]?.jsonPrimitive?.content != architecture) {
+                            fprintf(stderr, "Error: Manifest does not match architecture constraint\n")
+                            return@runBlocking
+                        }
+                        if (os != null && configJson["os"]?.jsonPrimitive?.content != os) {
+                            fprintf(stderr, "Error: Manifest does not match OS constraint\n")
+                            return@runBlocking
+                        }
+                        if (osVersion != null && configJson["os.version"]?.jsonPrimitive?.content != osVersion) {
+                            fprintf(stderr, "Error: Manifest does not match OS version constraint\n")
+                            return@runBlocking
+                        }
+                        if (variant != null && configJson["variant"]?.jsonPrimitive?.content != variant) {
+                            fprintf(stderr, "Error: Manifest does not match variant constraint\n")
+                            return@runBlocking
+                        }
+                        if (osFeatures.isNotEmpty()) {
+                            val features = configJson["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+                            if (!features.containsAll(osFeatures)) {
+                                fprintf(stderr, "Error: Manifest does not match OS features constraints\n")
+                                return@runBlocking
+                            }
+                        }
+                    }
+                    
+                    if (configBody.isNullOrBlank()) {
+                        fprintf(stderr, "Error: Manifest has no config\n")
+                        return@runBlocking
+                    }
+
+                    if (raw) {
+                        println(configBody)
+                    } else {
+                        val prettyJson = Json { prettyPrint = true }
+                        val configElement = Json.parseToJsonElement(configBody)
+                        println(prettyJson.encodeToString(JsonElement.serializer(), configElement))
+                    }
+                    return@runBlocking
+                }
+
+                // If we reached here, we followed an index and have manifestDigest
+                val artifacts = client.fetchArtifacts(imageRef.copy(reference = manifestDigest))
+                val configBody = artifacts.configs.firstOrNull()
+                if (configBody.isNullOrBlank()) {
+                    fprintf(stderr, "Error: Manifest has no config\n")
+                    return@runBlocking
+                }
+
+                if (raw) {
+                    println(configBody)
+                } else {
+                    val prettyJson = Json { prettyPrint = true }
+                    val configElement = Json.parseToJsonElement(configBody)
+                    println(prettyJson.encodeToString(JsonElement.serializer(), configElement))
+                }
+            } catch (e: Exception) {
+                fprintf(stderr, "Error: %s\n", e.message ?: "Unknown error")
+            } finally {
+                client.close()
+            }
+        }
+    }
+}
+
+/**
+ * Command to list tags for a repository.
+ */
+class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "tags") {
+    override fun help(context: Context): String = "List tags for a repository"
+    val repositoryRef by argument(help = "The OCI repository (e.g., registry-1.docker.io/library/alpine)")
+
+    @OptIn(ExperimentalForeignApi::class)
+    override fun run() {
+        runBlocking {
+            val raw = globalRaw()
+            val client = OciClient()
+            try {
+                val response = client.fetchTags(repositoryRef)
                 val body = response.bodyAsText()
                 if (raw) {
                     println(body)
@@ -356,6 +514,7 @@ fun main(args: Array<String>) {
     val metaCommand = MetaCommand()
     val indexCommand = IndexCommand(globalRaw = { ociFetch.raw })
     val manifestCommand = ManifestCommand(globalRaw = { ociFetch.raw })
-    metaCommand.subcommands(indexCommand, manifestCommand)
+    val configCommand = ConfigCommand(globalRaw = { ociFetch.raw })
+    metaCommand.subcommands(indexCommand, manifestCommand, configCommand)
     ociFetch.subcommands(tagsCommand, metaCommand).main(args)
 }
