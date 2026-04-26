@@ -19,6 +19,10 @@ actual class OciClient actual constructor() {
         return impl.fetchArtifacts(image)
     }
 
+    actual suspend fun fetchTags(repository: String): HttpResponse {
+        return impl.fetchTags(repository)
+    }
+
     actual fun close() {
         impl.close()
     }

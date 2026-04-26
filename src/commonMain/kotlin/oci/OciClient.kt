@@ -33,6 +33,11 @@ expect class OciClient() {
     suspend fun fetchArtifacts(image: ImageRef): FetchedArtifacts
 
     /**
+     * Fetches tags for the given repository.
+     */
+    suspend fun fetchTags(repository: String): HttpResponse
+
+    /**
      * Closes the underlying HTTP client.
      */
     fun close()
@@ -112,6 +117,16 @@ internal class OciClientImpl(private val client: HttpClient) {
     suspend fun fetchManifest(image: ImageRef): HttpResponse {
         val url = "https://${image.registry}/v2/${image.repository}/manifests/${image.reference}"
         return authorizedGet(url, acceptManifest)
+    }
+
+    suspend fun fetchTags(repository: String): HttpResponse {
+        // repository is like "library/alpine"
+        // registry is needed, so maybe we should pass ImageRef or just the full spec
+        val parts = repository.split('/', limit = 2)
+        val registry = parts[0]
+        val name = parts.getOrNull(1) ?: ""
+        val url = "https://$registry/v2/$name/tags/list"
+        return authorizedGet(url)
     }
 
     suspend fun authorizedGet(url: String, acceptHeader: String? = null): HttpResponse {

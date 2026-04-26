@@ -18,6 +18,10 @@ actual class OciClient actual constructor() {
         return impl.fetchArtifacts(image)
     }
 
+    actual suspend fun fetchTags(repository: String): HttpResponse {
+        return impl.fetchTags(repository)
+    }
+
     actual fun close() {
         impl.close()
     }
@@ -32,6 +36,7 @@ actual class OciClient actual constructor() {
 /**
  * WASM-JS-specific URL encoding using encodeURIComponent.
  */
+@OptIn(kotlin.js.ExperimentalWasmJsInterop::class)
 @JsFun("(s) => encodeURIComponent(s)")
 private external fun encodeURIComponentWasm(s: String): String
 

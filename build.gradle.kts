@@ -31,9 +31,9 @@ kotlin {
         nodejs()
     }
     linuxX64()
-    mingwX64 {
+    mingwX64("oci-fetch") {
         binaries.executable {
-            entryPoint = "example.main"
+            entryPoint = "main"
         }
     }
 
@@ -51,6 +51,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.ktor.client.core)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.clikt)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

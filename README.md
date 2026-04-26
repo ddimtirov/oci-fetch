@@ -52,8 +52,42 @@ Build specific targets:
 ./gradlew jvmJar           # JVM JAR
 ./gradlew jsJar            # JavaScript artifact
 ./gradlew wasmJsJar        # WASM artifact
-./gradlew linkDebugExecutableMingwX64   # Windows native executable
-./gradlew linkDebugExecutableLinuxX64   # Linux native executable
+./gradlew linkDebugExecutableOci-fetch     # Windows native executable
+./gradlew linkDebugExecutableLinuxX64     # Linux native executable
+```
+
+## Command-Line Tool (oci-fetch)
+
+The project includes a native command-line tool `oci-fetch` for interacting with OCI registries.
+
+### Building the CLI
+
+To build the native executable for your platform:
+
+```bash
+# Windows
+./gradlew linkDebugExecutableOci-fetch
+
+# Linux
+./gradlew linkDebugExecutableLinuxX64
+```
+
+The executable will be located at:
+- Windows: `build/bin/oci-fetch/debugExecutable/oci-fetch.exe`
+- Linux: `build/bin/linuxX64/debugExecutable/oci-fetch.kexe`
+
+### CLI Usage
+
+```bash
+# List tags for a repository
+oci-fetch tags registry-1.docker.io/library/alpine
+
+# Get raw JSON response for tags
+oci-fetch --raw tags registry-1.docker.io/library/alpine
+
+# Show help
+oci-fetch --help
+oci-fetch tags --help
 ```
 
 ## Usage Example
