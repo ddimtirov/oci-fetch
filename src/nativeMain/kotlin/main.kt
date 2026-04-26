@@ -57,6 +57,7 @@ class IndexCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "
                 val json = Json.parseToJsonElement(body).jsonObject
 
                 val isIndex = client.isIndexContent(contentType, json)
+                val isManifest = json.containsKey("layers") || json.containsKey("config")
 
                 if (isIndex) {
                     if (raw) {
@@ -77,6 +78,9 @@ class IndexCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "
                             println("$digest\t$mediaType\t$os\t$arch\t$osVer\t$osFeat\t$variant")
                         }
                     }
+                } else if (!isManifest) {
+                    fprintf(stderr, "Error: Format error: Reference points to neither an index nor a manifest (Content-Type: %s)\n", contentType)
+                    return@runBlocking
                 } else {
                     // It's a manifest
                     if (failOnManifest) {
@@ -186,7 +190,10 @@ class ManifestCommand(private val globalRaw: () -> Boolean) : CliktCommand(name 
                 val contentType = response.headers[HttpHeaders.ContentType] ?: ""
                 val json = Json.parseToJsonElement(body).jsonObject
 
-                if (client.isIndexContent(contentType, json)) {
+                val isIndex = client.isIndexContent(contentType, json)
+                val isManifest = json.containsKey("layers") || json.containsKey("config")
+
+                if (isIndex) {
                     val manifests = json["manifests"]?.jsonArray
                     val matches = manifests?.filter { entry ->
                         val obj = entry.jsonObject
@@ -250,7 +257,7 @@ class ManifestCommand(private val globalRaw: () -> Boolean) : CliktCommand(name 
                     } else {
                         printTsvManifest(manifestBody)
                     }
-                } else {
+                } else if (isManifest) {
                     // It's already a manifest. Check if it matches constraints.
                     // Manifests don't have platform info. OCI spec says platform is in index or in config.
                     // The requirement says: "If the ref points to a manifest, dump it if it matches the constraints, or throw error if it does not."
@@ -309,6 +316,9 @@ class ManifestCommand(private val globalRaw: () -> Boolean) : CliktCommand(name 
                     } else {
                         printTsvManifest(body)
                     }
+                } else {
+                    fprintf(stderr, "Error: Format error: Reference points to neither an index nor a manifest (Content-Type: %s)\n", contentType)
+                    return@runBlocking
                 }
             } catch (e: Exception) {
                 fprintf(stderr, "Error: %s\n", e.message ?: "Unknown error")
@@ -350,8 +360,13 @@ class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = 
                 val contentType = response.headers[HttpHeaders.ContentType] ?: ""
                 val json = Json.parseToJsonElement(body).jsonObject
 
+                val isIndex = client.isIndexContent(contentType, json)
+                val isManifest = json.containsKey("layers") || json.containsKey("config")
+                // Config usually has "rootfs" and "history", and maybe "config" or "architecture"
+                val isConfig = json.containsKey("rootfs") || json.containsKey("history")
+
                 val manifestDigest: String
-                if (client.isIndexContent(contentType, json)) {
+                if (isIndex) {
                     val manifests = json["manifests"]?.jsonArray
                     val matches = manifests?.filter { entry ->
                         val obj = entry.jsonObject
@@ -401,7 +416,7 @@ class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = 
                         return@runBlocking
                     }
                     manifestDigest = selectedDigest
-                } else {
+                } else if (isManifest) {
                     // It's already a manifest. Check if it matches constraints.
                     // We need the config to check constraints.
                     val artifacts = client.fetchArtifacts(imageRef)
@@ -450,6 +465,18 @@ class ConfigCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = 
                         val configElement = Json.parseToJsonElement(configBody)
                         println(prettyJson.encodeToString(JsonElement.serializer(), configElement))
                     }
+                    return@runBlocking
+                } else if (isConfig) {
+                    // It points to a config directly
+                    if (raw) {
+                        println(body)
+                    } else {
+                        val prettyJson = Json { prettyPrint = true }
+                        println(prettyJson.encodeToString(JsonElement.serializer(), json))
+                    }
+                    return@runBlocking
+                } else {
+                    fprintf(stderr, "Error: Format error: Reference points to an unknown type (Content-Type: %s)\n", contentType)
                     return@runBlocking
                 }
 
