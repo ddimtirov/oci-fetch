@@ -3,6 +3,7 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import io.ktor.client.statement.bodyAsBytes
 import kotlinx.coroutines.runBlocking
 import oci.*
 import io.ktor.client.statement.bodyAsText
@@ -15,6 +16,7 @@ import platform.posix.fgets
 import platform.posix.stdin
 import platform.posix.feof
 import kotlinx.cinterop.*
+import org.kotlincrypto.hash.sha2.SHA256
 
 /**
  * Main command for oci-fetch executable.
@@ -88,7 +90,7 @@ class IndexCommand(
     }
 
     private suspend fun queryAndFormat(client: OciClient, raw: Boolean, selector: PlatformSelector): String {
-        val imageRef = OciClient.parseRef(ref)
+        val imageRef = client.parseRef(ref)
         val response = client.fetchManifest(imageRef)
         check(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
 
@@ -135,7 +137,7 @@ class ReferrersCommand(
         runBlocking {
             val raw = globalRaw()
             val output = OciClient().use { client ->
-                val imageRef = OciClient.parseRef(ref)
+                val imageRef = client.parseRef(ref)
 
                 val digest = when {
                     imageRef.reference.startsWith("sha256:") -> imageRef.reference
@@ -143,8 +145,7 @@ class ReferrersCommand(
                     else -> {
                         val response = client.fetchManifest(imageRef)
                         check(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
-                        response.headers["Docker-Content-Digest"]
-                            ?: ("sha256:" + sha256Hex(response.bodyAsText().encodeToByteArray()))
+                        response.headers["Docker-Content-Digest"] ?: ("sha256:" + SHA256().digest(response.bodyAsBytes()).toHexString())
                     }
                 }
 
@@ -174,7 +175,7 @@ class ManifestCommand(
         runBlocking {
             val raw = globalRaw()
             val output = OciClient().use { client ->
-                val imageRef = OciClient.parseRef(ref)
+                val imageRef = client.parseRef(ref)
                 val resolution = client.resolveManifest(imageRef, selector)
                 if (raw) resolution.body else formatTsvManifest(resolution.body)
             }
@@ -202,7 +203,7 @@ class ConfigCommand(
         runBlocking {
             val raw = globalRaw()
             val output = OciClient().use { client ->
-                val imageRef = OciClient.parseRef(ref)
+                val imageRef = client.parseRef(ref)
                 val resolution = client.resolveManifest(imageRef, selector)
                 val artifacts = client.fetchArtifacts(resolution.imageRef)
                 val configBody = artifacts.configs.firstOrNull()

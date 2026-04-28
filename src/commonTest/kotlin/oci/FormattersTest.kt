@@ -1,5 +1,7 @@
 package oci
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -27,7 +29,7 @@ class FormattersTest {
         val expected = "digest\tartifactType\tmediaType\tsize\tannotations\n" +
                 "sha256:123\tapplication/vnd.dev.cosign.artifact.sig.v1+json\tapplication/vnd.oci.image.manifest.v1+json\t456\tdev.cosign.artifact.hash=sha256:abc"
 
-        val actual = formatTsvReferrers(body)
+        val actual = formatTsvReferrers(Json.parseToJsonElement(body).jsonObject)
         assertEquals(expected, actual)
     }
 
@@ -41,7 +43,7 @@ class FormattersTest {
             }
         """.trimIndent()
 
-        val actual = formatTsvReferrers(body)
+        val actual = formatTsvReferrers(Json.parseToJsonElement(body).jsonObject)
         assertEquals("digest\tartifactType\tmediaType\tsize\tannotations", actual)
     }
 
@@ -60,7 +62,7 @@ class FormattersTest {
         // formatTsvReferrers calls trimEnd() on the buffer, so trailing empty cells (tabs) are stripped.
         val expected = "digest\tartifactType\tmediaType\tsize\tannotations\nsha256:abc"
 
-        val actual = formatTsvReferrers(body)
+        val actual = formatTsvReferrers(Json.parseToJsonElement(body).jsonObject)
         assertEquals(expected, actual)
     }
 
@@ -84,7 +86,7 @@ class FormattersTest {
             }
         """.trimIndent()
 
-        val actual = formatTsvReferrers(body)
+        val actual = formatTsvReferrers(Json.parseToJsonElement(body).jsonObject)
         // Annotations join with "; " and field order follows JSON insertion order.
         val expected = "digest\tartifactType\tmediaType\tsize\tannotations\n" +
                 "sha256:1\t\tapplication/vnd.oci.image.manifest.v1+json\t10\tk1=v1; k2=v2"

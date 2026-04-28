@@ -17,7 +17,7 @@ expect fun isNative(): Boolean
 class OciClientTest {
     @Test
     fun testParseRef_simple() {
-        val ref = OciClient.parseRef("registry.example.com/myapp")
+        val ref = OciClient().parseRef("registry.example.com/myapp")
         assertEquals("registry.example.com", ref.registry)
         assertEquals("myapp", ref.repository)
         assertEquals("latest", ref.reference)
@@ -25,7 +25,7 @@ class OciClientTest {
 
     @Test
     fun testParseRef_withTag() {
-        val ref = OciClient.parseRef("registry.example.com/myapp:v1.0")
+        val ref = OciClient().parseRef("registry.example.com/myapp:v1.0")
         assertEquals("registry.example.com", ref.registry)
         assertEquals("myapp", ref.repository)
         assertEquals("v1.0", ref.reference)
@@ -33,7 +33,7 @@ class OciClientTest {
 
     @Test
     fun testParseRef_withDigest() {
-        val ref = OciClient.parseRef("registry.example.com/myapp@sha256:abc123")
+        val ref = OciClient().parseRef("registry.example.com/myapp@sha256:abc123")
         assertEquals("registry.example.com", ref.registry)
         assertEquals("myapp", ref.repository)
         assertEquals("sha256:abc123", ref.reference)
@@ -41,7 +41,7 @@ class OciClientTest {
 
     @Test
     fun testParseRef_withPath() {
-        val ref = OciClient.parseRef("registry-1.docker.io/library/alpine:latest")
+        val ref = OciClient().parseRef("registry-1.docker.io/library/alpine:latest")
         assertEquals("registry-1.docker.io", ref.registry)
         assertEquals("library/alpine", ref.repository)
         assertEquals("latest", ref.reference)
@@ -51,7 +51,7 @@ class OciClientTest {
     fun testFetchManifest_alpine() = runTest {
         if (isBrowser() || isNative()) return@runTest
         OciClient().use { client ->
-            val ref = OciClient.parseRef("registry-1.docker.io/library/alpine:latest")
+            val ref = client.parseRef("registry-1.docker.io/library/alpine:latest")
             val response = client.fetchManifest(ref)
 
             assertTrue(response.status.isSuccess(), "Expected successful response")
@@ -107,7 +107,7 @@ class OciClientTest {
         )
         for (spec in images) {
             OciClient().use { client ->
-                val ref = OciClient.parseRef(spec)
+                val ref = client.parseRef(spec)
                 val resp = client.fetchManifest(ref)
                 val body = runCatching { resp.bodyAsText() }.getOrNull()
 
@@ -127,7 +127,10 @@ class OciClientTest {
                 val json = Json.parseToJsonElement(body).jsonObject
                 val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
                 assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec")
-                assertTrue(schemaVersion == 1 || schemaVersion == 2, "Unexpected schemaVersion=$schemaVersion for $spec")
+                assertTrue(
+                    schemaVersion == 1 || schemaVersion == 2,
+                    "Unexpected schemaVersion=$schemaVersion for $spec"
+                )
             }
         }
     }

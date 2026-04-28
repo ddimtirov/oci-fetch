@@ -1,10 +1,15 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.detekt)
     id("oci-fetch.locking")
     id("oci-fetch.testing")
-    id("oci-fetch.example-run")
     id("oci-fetch.native-tooling")
+}
+
+detekt {
+    config.setFrom(files("detekt.yml"))
+    buildUponDefaultConfig = true
 }
 
 group = "io.github.ddimtirov"
@@ -21,7 +26,7 @@ dependencyLocking {
 kotlin {
     jvmToolchain(25)
     jvm()
-    js(IR) {
+    js {
         browser()
         nodejs()
     }
@@ -30,13 +35,16 @@ kotlin {
         browser()
         nodejs()
     }
-    linuxX64()
-    mingwX64("oci-fetch") {
+    linuxX64() {
         binaries.executable {
             entryPoint = "main"
         }
     }
-
+    mingwX64() {
+        binaries.executable {
+            entryPoint = "main"
+        }
+    }
     targets.all {
         compilations.all {
             compileTaskProvider.configure {

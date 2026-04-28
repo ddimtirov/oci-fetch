@@ -1,7 +1,37 @@
-style:
-  MaxLineLength:
-    active: false
-
 formatting:
   MaximumLineLength:
-    active: false
+    maxLineLength: 240
+
+complexity:
+  active: true
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 15
+  CognitiveComplexMethod:
+    active: true
+    threshold: 15
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 20
+
+style:
+  active: true
+  MaxLineLength:
+    maxLineLength: 240
+  MagicNumber:
+    active: true
+    ignoreNumbers: ['-1', '0', '1', '2']
+  WildcardImport:
+    active: true
+
+potential-bugs:
+  active: true
+  EmptyCatchBlock:
+    active: true
+  UnsafeCallOnNullableType:
+    active: true
+
+performance:
+  active: true
+  UnnecessaryTemporaryObject:
+    active: true

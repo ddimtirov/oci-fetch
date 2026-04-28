@@ -6,7 +6,9 @@ import io.ktor.client.engine.js.Js
 /**
  * Creates a WASM-JS-specific HttpClient engine.
  */
-actual fun createHttpClient(): HttpClient = HttpClient(Js)
+internal actual fun createHttpClient(): HttpClient = HttpClient(Js)
+
+internal actual fun urlEncode(s: String): String = encodeURIComponentWasm(s)
 
 /**
  * WASM-JS-specific URL encoding using encodeURIComponent.
@@ -14,5 +16,3 @@ actual fun createHttpClient(): HttpClient = HttpClient(Js)
 @OptIn(kotlin.js.ExperimentalWasmJsInterop::class)
 @JsFun("(s) => encodeURIComponent(s)")
 private external fun encodeURIComponentWasm(s: String): String
-
-internal actual fun urlEncode(s: String): String = encodeURIComponentWasm(s)

@@ -17,3 +17,7 @@ You **MUST** refresh the dependency locks by running the following command:
 ```
 
 This ensures that `gradle.lockfile` and `settings-gradle.lockfile` are updated to reflect the changes. Always include the updated lockfiles in your submission.
+
+## Error Handling
+
+- Never replace an exception with `null` unless you can meaningfully recover through a fallback action. Replacing exceptions with `null` only propagates the error further away from the root cause.

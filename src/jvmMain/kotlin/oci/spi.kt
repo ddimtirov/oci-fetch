@@ -6,7 +6,7 @@ import io.ktor.client.engine.cio.CIO
 /**
  * Creates a JVM-specific HttpClient engine using CIO.
  */
-actual fun createHttpClient(): HttpClient = HttpClient(CIO)
+internal actual fun createHttpClient(): HttpClient = HttpClient(CIO)
 
 /**
  * JVM-specific URL encoding using java.net.URLEncoder.

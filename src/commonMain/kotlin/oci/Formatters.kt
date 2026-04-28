@@ -38,9 +38,7 @@ fun formatTsvManifest(body: String): String = buildString {
     val json = Json.parseToJsonElement(body).jsonObject
     
     val isManifest = json.containsKey("layers") || json.containsKey("config")
-    if (!isManifest) {
-        throw IllegalArgumentException("The content is not a valid manifest")
-    }
+    require(isManifest) { "The content is not a valid manifest" }
 
     val artifactType = json["artifactType"]?.jsonPrimitive?.content ?: ""
     if (artifactType.isNotEmpty()) {
@@ -82,8 +80,7 @@ fun formatTsvManifest(body: String): String = buildString {
 /**
  * Formats an OCI index of referrers as TSV.
  */
-fun formatTsvReferrers(body: String): String = buildString {
-    val json = Json.parseToJsonElement(body).jsonObject
+fun formatTsvReferrers(json: JsonObject): String = buildString {
     val manifests = json["manifests"]?.jsonArray
     appendLine("digest\tartifactType\tmediaType\tsize\tannotations")
     manifests?.forEach { entry ->

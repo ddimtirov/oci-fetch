@@ -2,47 +2,44 @@ package oci
 
 import io.ktor.http.HttpStatusCode
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.Headers
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class OciAuthAndFetchTest {
 
-    private suspend fun doTest(spec: String) {
-        if (isBrowser() || isNative()) return
-        val client = OciClient()
-        try {
-            val ref = OciClient.parseRef(spec)
+    private fun imageTest(spec: String) = runTest {
+        OciClient().use { client ->
+            if (isBrowser() || isNative()) return@use
+
+            val ref = client.parseRef(spec)
             val resp = client.fetchManifest(ref)
             val body = resp.bodyAsText()
 
-            if (resp.status != HttpStatusCode.OK) {
-                val headers = resp.headers.entries().joinToString("\n") { (k, v) -> "$k: ${v.joinToString()}" }
-                val msg = buildString {
-                    appendLine("Unexpected status ${resp.status} for $spec")
-                    appendLine("URL: https://${ref.registry}/v2/${ref.repository}/manifests/${ref.reference}")
-                    appendLine("Headers:\n$headers")
-                    appendLine("Body:\n$body")
-                }
-                throw AssertionError(msg)
-            }
+            val requestDescription = """
+                URL: https://${ref.registry}/v2/${ref.repository}/manifests/${ref.reference}
+                Headers:
+                ${resp.headers.entries().joinToString("\n") { (k, v) -> "\t$k: ${v.joinToString()}" }}
+                Body:
+                $body               
+            """.trimIndent()
+
+            assertEquals(HttpStatusCode.OK, resp.status, "Unexpected HTTP status for $spec\n$requestDescription")
+            assertNotNull(body, "Empty body for $spec\n$requestDescription")
 
             // Basic sanity: parse JSON and check schemaVersion exists and is 2 (typical)
-            assertNotNull(body, "Empty body for $spec")
             val json = Json.parseToJsonElement(body).jsonObject
             val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
-            assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec")
-            assertTrue(schemaVersion == 1 || schemaVersion == 2, "Unexpected schemaVersion=$schemaVersion for $spec")
-        } finally {
-            client.close()
+            assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec\n$requestDescription")
+            assertTrue(schemaVersion == 1 || schemaVersion == 2, "Unexpected schemaVersion=$schemaVersion for $spec\n$requestDescription")
         }
     }
-
-    private fun imageTest(spec: String) = runTest { doTest(spec) }
 
     @Test fun ubi7() = imageTest("registry.access.redhat.com/ubi7/ubi")
     @Test fun ubi7minimal() = imageTest("registry.access.redhat.com/ubi7/ubi-minimal")

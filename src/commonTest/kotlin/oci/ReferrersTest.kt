@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.kotlincrypto.hash.sha2.SHA256
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -25,7 +26,7 @@ class ReferrersTest {
     private fun mockClient(handler: MockRequestHandler): HttpClient =
         HttpClient(MockEngine(handler))
 
-    private val jsonContentType = "application/vnd.oci.image.index.v1+json"
+    private val ociImageContentType = "application/vnd.oci.image.index.v1+json"
 
     @Test
     fun apiReturnsBody_whenServerFiltered() = runTest {
@@ -37,13 +38,13 @@ class ReferrersTest {
                 content = responseJson,
                 status = HttpStatusCode.OK,
                 headers = headersOf(
-                    HttpHeaders.ContentType to listOf(jsonContentType),
+                    HttpHeaders.ContentType to listOf(ociImageContentType),
                     "OCI-Filters-Applied" to listOf("artifactType")
                 )
             )
         }).use { client ->
             val result = client.fetchReferrers(image, subjectDigest, "application/sig", null)
-            assertEquals(responseJson, result)
+            assertEquals(Json.parseToJsonElement(responseJson).jsonObject, result)
         }
     }
 
@@ -55,13 +56,12 @@ class ReferrersTest {
         ]}"""
         OciClient(mockClient { _ ->
             respond(
-                content = responseJson,
                 status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, jsonContentType)
+                headers = headersOf(HttpHeaders.ContentType, ociImageContentType),
+                content = responseJson
             )
         }).use { client ->
-            val result = client.fetchReferrers(image, subjectDigest, "application/sig", null)
-            val parsed = Json.parseToJsonElement(result).jsonObject
+            val parsed = client.fetchReferrers(image, subjectDigest, "application/sig")
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals("application/sig", manifests[0].jsonObject["artifactType"]?.jsonPrimitive?.content)
@@ -77,7 +77,7 @@ class ReferrersTest {
                 req.url.encodedPath.endsWith("/manifests/$tagFallback") -> respond(
                     content = tagBody,
                     status = HttpStatusCode.OK,
-                    headers = headersOf(HttpHeaders.ContentType, jsonContentType)
+                    headers = headersOf(HttpHeaders.ContentType, ociImageContentType)
                 )
                 req.url.encodedPath.endsWith(".sig") ||
                 req.url.encodedPath.endsWith(".att") ||
@@ -85,8 +85,7 @@ class ReferrersTest {
                 else -> error("Unexpected request: ${req.url}")
             }
         }).use { client ->
-            val result = client.fetchReferrers(image, subjectDigest, null, null)
-            val parsed = Json.parseToJsonElement(result).jsonObject
+            val parsed = client.fetchReferrers(image, subjectDigest, null, null)
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals("sha256:x", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
@@ -96,8 +95,7 @@ class ReferrersTest {
     @Test
     fun api404AndTag404ReturnsEmptyIndex() = runTest {
         OciClient(mockClient { _ -> respond("", HttpStatusCode.NotFound) }).use { client ->
-            val result = client.fetchReferrers(image, subjectDigest, null, null)
-            val parsed = Json.parseToJsonElement(result).jsonObject
+            val parsed = client.fetchReferrers(image, subjectDigest, null, null)
             assertEquals(0, parsed["manifests"]!!.jsonArray.size)
         }
     }
@@ -155,8 +153,7 @@ class ReferrersTest {
                 else -> error("Unexpected request: ${req.url}")
             }
         }).use { client ->
-            val result = client.fetchReferrers(image, subjectDigest, null, ".*\\.sig$")
-            val parsed = Json.parseToJsonElement(result).jsonObject
+            val parsed = client.fetchReferrers(image, subjectDigest, null, ".*\\.sig$")
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(2, manifests.size)
             assertTrue(manifests.all { it.jsonObject["digest"]?.jsonPrimitive?.content == "sha256:descriptor" })
@@ -195,8 +192,7 @@ class ReferrersTest {
                 else -> error("Unexpected request: ${req.url}")
             }
         }).use { client ->
-            val result = client.fetchReferrers(image, subjectDigest, "application/sig", ".*\\.sig$")
-            val parsed = Json.parseToJsonElement(result).jsonObject
+            val parsed = client.fetchReferrers(image, subjectDigest, "application/sig", ".*\\.sig$")
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals("sha256:sig", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
@@ -208,7 +204,7 @@ class ReferrersTest {
     fun scrapeUsesSha256FallbackWhenDigestHeaderMissing() = runTest {
         val tagsListJson = """{"name":"library/alpine","tags":["only.sig"]}"""
         val manifest = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","subject":{"digest":"$subjectDigest"},"config":{"digest":"sha256:c"},"layers":[]}"""
-        val expectedDigest = "sha256:" + sha256Hex(manifest.encodeToByteArray())
+        val expectedDigest = "sha256:" + SHA256().digest(manifest.encodeToByteArray()).toHexString()
 
         OciClient(mockClient { req ->
             when {
@@ -225,8 +221,7 @@ class ReferrersTest {
                 else -> error("Unexpected request: ${req.url}")
             }
         }).use { client ->
-            val result = client.fetchReferrers(image, subjectDigest, null, ".*\\.sig$")
-            val parsed = Json.parseToJsonElement(result).jsonObject
+            val parsed = client.fetchReferrers(image, subjectDigest, null, ".*\\.sig$")
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals(expectedDigest, manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)

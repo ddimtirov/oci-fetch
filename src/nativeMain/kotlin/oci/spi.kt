@@ -6,7 +6,7 @@ import io.ktor.client.engine.curl.Curl
 /**
  * Creates a native-specific HttpClient engine using Curl.
  */
-actual fun createHttpClient(): HttpClient = HttpClient(Curl)
+internal actual fun createHttpClient(): HttpClient = HttpClient(Curl)
 
 /**
  * Native-specific URL encoding.
@@ -21,7 +21,7 @@ internal actual fun urlEncode(s: String): String {
                 append(c)
             } else {
                 append("%")
-                append((b.toInt() and 0xFF).toString(16).uppercase().padStart(2, '0'))
+                append(b.toHexString(HexFormat.UpperCase))
             }
         }
     }

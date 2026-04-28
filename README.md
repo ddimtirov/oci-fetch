@@ -130,7 +130,7 @@ suspend fun main() {
     val client = OciClient()
     try {
         // Parse image reference
-        val ref = OciClient.parseRef("registry-1.docker.io/library/alpine:latest")
+        val ref = client.parseRef("registry-1.docker.io/library/alpine:latest")
 
         // Fetch manifest
         val response = client.fetchManifest(ref)
