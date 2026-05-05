@@ -17,7 +17,7 @@ expect fun isNative(): Boolean
 class OciClientTest {
     @Test
     fun testParseRef_simple() {
-        val ref = OciClient().parseRef("registry.example.com/myapp")
+        val ref = OciRef.parse("registry.example.com/myapp")
         assertEquals("registry.example.com", ref.registry)
         assertEquals("myapp", ref.repository)
         assertEquals("latest", ref.reference)
@@ -25,7 +25,7 @@ class OciClientTest {
 
     @Test
     fun testParseRef_withTag() {
-        val ref = OciClient().parseRef("registry.example.com/myapp:v1.0")
+        val ref = OciRef.parse("registry.example.com/myapp:v1.0")
         assertEquals("registry.example.com", ref.registry)
         assertEquals("myapp", ref.repository)
         assertEquals("v1.0", ref.reference)
@@ -33,7 +33,7 @@ class OciClientTest {
 
     @Test
     fun testParseRef_withDigest() {
-        val ref = OciClient().parseRef("registry.example.com/myapp@sha256:abc123")
+        val ref = OciRef.parse("registry.example.com/myapp@sha256:abc123")
         assertEquals("registry.example.com", ref.registry)
         assertEquals("myapp", ref.repository)
         assertEquals("sha256:abc123", ref.reference)
@@ -41,7 +41,7 @@ class OciClientTest {
 
     @Test
     fun testParseRef_withPath() {
-        val ref = OciClient().parseRef("registry-1.docker.io/library/alpine:latest")
+        val ref = OciRef.parse("registry-1.docker.io/library/alpine:latest")
         assertEquals("registry-1.docker.io", ref.registry)
         assertEquals("library/alpine", ref.repository)
         assertEquals("latest", ref.reference)
@@ -51,8 +51,8 @@ class OciClientTest {
     fun testFetchManifest_alpine() = runTest {
         if (isBrowser() || isNative()) return@runTest
         OciClient().use { client ->
-            val ref = client.parseRef("registry-1.docker.io/library/alpine:latest")
-            val response = client.fetchManifest(ref)
+            val ref = OciRef.parse("registry-1.docker.io/library/alpine:latest")
+            val response = client.requestManifest(ref)
 
             assertTrue(response.status.isSuccess(), "Expected successful response")
 
@@ -84,13 +84,13 @@ class OciClientTest {
     }
 
     @Test
-    fun testIsIndexContent() {
+    fun testIsOciIndex() {
         OciClient().use { client ->
-            assertTrue(client.isIndexContent("application/vnd.oci.image.index.v1+json", null))
-            assertTrue(client.isIndexContent("application/vnd.docker.distribution.manifest.list.v2+json", null))
+            assertTrue(client.isOciImageIndex(null, "application/vnd.oci.image.index.v1+json"))
+            assertTrue(client.isOciImageIndex(null, "application/vnd.docker.distribution.manifest.list.v2+json"))
 
             val json = Json.parseToJsonElement("""{"manifests": []}""").jsonObject
-            assertTrue(client.isIndexContent("text/plain", json))
+            assertTrue(client.isOciImageIndex(json, "text/plain"))
         }
     }
 
@@ -107,8 +107,8 @@ class OciClientTest {
         )
         for (spec in images) {
             OciClient().use { client ->
-                val ref = client.parseRef(spec)
-                val resp = client.fetchManifest(ref)
+                val ref = OciRef.parse(spec)
+                val resp = client.requestManifest(ref)
                 val body = runCatching { resp.bodyAsText() }.getOrNull()
 
                 if (!resp.status.isSuccess()) {

@@ -1,32 +1,57 @@
 package oci
 
-/**
- * Result of manifest resolution.
- */
-data class ManifestResolution(
-    val body: String,
-    val digest: String,
-    val contentType: String,
-    val imageRef: ImageRef
-)
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Image reference containing registry, repository, and tag/digest.
  */
-data class ImageRef(
+data class OciRef(
     val registry: String,
     val repository: String,
-    val reference: String = "latest"
+    val reference: String = "latest",
+    val isDigest: Boolean = false
+) {
+    fun withDigest(digest: String): OciRef = copy(isDigest = true, reference = digest)
+    fun withTag(tag: String): OciRef = copy(isDigest = false, reference = tag)
+    fun withReference(reference: String): OciRef = copy(isDigest = reference.contains(':'), reference = reference)
+
+    companion object {
+        /**
+         * Parses an image reference string into an ImageRef.
+         * Example: registry-1.docker.io/library/alpine:latest
+         */
+        fun parse(spec: String, defaultTag: String = "latest"): OciRef {
+            // input like: registry-1.docker.io/library/alpine
+            val parts = spec.split('/')
+            require(parts.size >= 2) { "Invalid image reference: $spec" }
+
+            val registry = parts.first()
+            val repo = parts.drop(1).joinToString("/")
+            return when {
+                '@' in repo -> {
+                    val (r, digest) = repo.split('@', limit = 2)
+                    OciRef(registry, r, digest, isDigest = true)
+                }
+                ':' in repo -> {
+                    val idx = repo.lastIndexOf(':')
+                    val r = repo.substring(0, idx)
+                    val tag = repo.substring(idx + 1)
+                    OciRef(registry, r, tag)
+                }
+                else -> OciRef(registry, repo, defaultTag)
+            }
+        }
+    }
+}
+
+data class ImageIndexArtifacts(
+    val ref: OciRef,
+    val index: JsonObject?,
+    val images: List<ImageArtifacts>
 )
 
-/**
- * Fetched artifacts for an image reference. JSON blobs are kept as raw text.
- * - listManifest: the manifest list / index JSON if present, otherwise null
- * - imageManifests: list of image manifest JSONs (one per platform if index, or single if not)
- * - configs: list of corresponding config JSONs in the same order as imageManifests
- */
-data class FetchedArtifacts(
-    val listManifest: String?,
-    val imageManifests: List<String>,
-    val configs: List<String>
+data class ImageArtifacts(
+    val ref: OciRef,
+    val manifest: JsonObject,
+    val config: JsonObject?,
 )

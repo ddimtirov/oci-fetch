@@ -1,6 +1,15 @@
 package oci
 
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+
+private val prettyJson = Json { prettyPrint = true }
 
 /**
  * Formats an OCI index manifest as TSV.
@@ -34,18 +43,17 @@ fun formatTsvIndex(
 /**
  * Formats an OCI manifest as TSV.
  */
-fun formatTsvManifest(body: String): String = buildString {
-    val json = Json.parseToJsonElement(body).jsonObject
-    
-    val isManifest = json.containsKey("layers") || json.containsKey("config")
+fun formatTsvManifest(manifestStr: String): String = buildString {
+    val manifest = Json.parseToJsonElement(manifestStr).jsonObject
+    val isManifest = manifest.containsKey("layers") || manifest.containsKey("config")
     require(isManifest) { "The content is not a valid manifest" }
 
-    val artifactType = json["artifactType"]?.jsonPrimitive?.content ?: ""
+    val artifactType = manifest["artifactType"]?.jsonPrimitive?.content ?: ""
     if (artifactType.isNotEmpty()) {
         appendLine("ARTIFACT_TYPE\t$artifactType")
     }
 
-    val subject = json["subject"]?.jsonObject
+    val subject = manifest["subject"]?.jsonObject
     if (subject != null) {
         val digest = subject["digest"]?.jsonPrimitive?.content ?: ""
         val mediaType = subject["mediaType"]?.jsonPrimitive?.content ?: ""
@@ -53,7 +61,7 @@ fun formatTsvManifest(body: String): String = buildString {
         appendLine("SUBJECT\t$digest\t$mediaType\t$size")
     }
 
-    val config = json["config"]?.jsonObject
+    val config = manifest["config"]?.jsonObject
     if (config != null) {
         val digest = config["digest"]?.jsonPrimitive?.content ?: ""
         val mediaType = config["mediaType"]?.jsonPrimitive?.content ?: ""
@@ -61,7 +69,7 @@ fun formatTsvManifest(body: String): String = buildString {
         appendLine("CONFIG\t$digest\t$mediaType\t$size")
     }
 
-    val layers = json["layers"]?.jsonArray
+    val layers = manifest["layers"]?.jsonArray
     layers?.forEachIndexed { index, element ->
         val layer = element.jsonObject
         val digest = layer["digest"]?.jsonPrimitive?.content ?: ""
@@ -70,7 +78,7 @@ fun formatTsvManifest(body: String): String = buildString {
         appendLine("LAYER\t$index\t$digest\t$mediaType\t$size")
     }
 
-    val annotations = json["annotations"]?.jsonObject
+    val annotations = manifest["annotations"]?.jsonObject
     annotations?.forEach { (key, value) ->
         val v = value.jsonPrimitive.content.replace("\n", " ").replace("\t", " ")
         appendLine("ANNOTATION\t$key\t$v")
@@ -80,8 +88,9 @@ fun formatTsvManifest(body: String): String = buildString {
 /**
  * Formats an OCI index of referrers as TSV.
  */
-fun formatTsvReferrers(json: JsonObject): String = buildString {
-    val manifests = json["manifests"]?.jsonArray
+fun formatTsvReferrers(indexStr: String): String = buildString {
+    val index = Json.parseToJsonElement(indexStr).jsonObject
+    val manifests = index["manifests"]?.jsonArray
     appendLine("digest\tartifactType\tmediaType\tsize\tannotations")
     manifests?.forEach { entry ->
         val obj = entry.jsonObject
@@ -101,8 +110,8 @@ fun formatTsvReferrers(json: JsonObject): String = buildString {
 /**
  * Pretty-prints a JSON config.
  */
-fun formatPrettyConfig(body: String): String {
-    val prettyJson = Json { prettyPrint = true }
-    val configElement = Json.parseToJsonElement(body)
-    return prettyJson.encodeToString(JsonElement.serializer(), configElement)
-}
+fun formatPrettyJson(config: JsonObject): String =
+    prettyJson.encodeToString(JsonElement.serializer(), config)
+
+fun formatPrettyJson(config: String): String =
+    formatPrettyJson(Json.parseToJsonElement(config).jsonObject)

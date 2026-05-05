@@ -10,12 +10,11 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.*
 import kotlinx.serialization.json.*
 import kotlin.io.println
-import platform.posix.fprintf
-import platform.posix.stderr
 import platform.posix.fgets
 import platform.posix.stdin
 import platform.posix.feof
 import kotlinx.cinterop.*
+import oci.OciRef
 import org.kotlincrypto.hash.sha2.SHA256
 
 /**
@@ -90,16 +89,16 @@ class IndexCommand(
     }
 
     private suspend fun queryAndFormat(client: OciClient, raw: Boolean, selector: PlatformSelector): String {
-        val imageRef = client.parseRef(ref)
-        val response = client.fetchManifest(imageRef)
+        val imageRef = OciRef.parse(ref)
+        val response = client.requestManifest(imageRef)
         check(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
 
         val body = response.bodyAsText()
         val contentType = response.headers[HttpHeaders.ContentType] ?: ""
         val json = Json.parseToJsonElement(body).jsonObject
 
-        val isIndex = client.isIndexContent(contentType, json)
-        val isManifest = client.isManifestContent(json)
+        val isIndex = client.isOciImageIndex(json, contentType)
+        val isManifest = client.isOciImageManifest(json)
         check(isIndex || isManifest) { "Reference points to neither an index nor a manifest (Content-Type: $contentType)" }
         check(isIndex || !requireIndex) { "--fail was requested and reference points to a non-index." }
 
@@ -137,20 +136,27 @@ class ReferrersCommand(
         runBlocking {
             val raw = globalRaw()
             val output = OciClient().use { client ->
-                val imageRef = client.parseRef(ref)
+                val imageRef = OciRef.parse(ref)
 
-                val digest = when {
-                    imageRef.reference.startsWith("sha256:") -> imageRef.reference
-                    selector.hasConstraints() -> client.resolveManifest(imageRef, selector).digest
+                val digestRef = when {
+                    imageRef.isDigest -> imageRef
+                    selector.hasConstraints() -> client.resolveToImageManifest(imageRef, selector).also { check(it.isDigest) }
                     else -> {
-                        val response = client.fetchManifest(imageRef)
+                        val response = client.requestManifest(imageRef)
                         check(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
-                        response.headers["Docker-Content-Digest"] ?: ("sha256:" + SHA256().digest(response.bodyAsBytes()).toHexString())
+                        val digest = response.headers["Docker-Content-Digest"]
+                            ?: ("sha256:" + SHA256().digest(response.bodyAsBytes()).toHexString())
+                        imageRef.withDigest(digest)
                     }
                 }
 
-                val body = client.fetchReferrers(imageRef, digest, type, scrape)
-                if (raw) body else formatTsvReferrers(body)
+                val scrapedTagsRegex = scrape
+                val referrers = if (scrapedTagsRegex != null) {
+                    client.scrapeReferrers(digestRef, scrapedTagsRegex, type)
+                } else {
+                    client.fetchReferrers(digestRef, type)
+                }
+                if (raw) formatPrettyJson(referrers) else formatTsvReferrers(referrers.toString())
             }
             println(output)
         }
@@ -175,9 +181,12 @@ class ManifestCommand(
         runBlocking {
             val raw = globalRaw()
             val output = OciClient().use { client ->
-                val imageRef = client.parseRef(ref)
-                val resolution = client.resolveManifest(imageRef, selector)
-                if (raw) resolution.body else formatTsvManifest(resolution.body)
+                val imageRef = client.resolveToImageManifest(OciRef.parse(ref), selector)
+                val manifestResponse = client.requestManifest(imageRef)
+                check(manifestResponse.status.isSuccess()) { "Failed to fetch manifest: ${manifestResponse.status}" }
+                val manifestStr = manifestResponse.bodyAsText()
+
+                if (raw) manifestStr else formatTsvManifest(manifestStr)
             }
             println(output)
         }
@@ -203,13 +212,12 @@ class ConfigCommand(
         runBlocking {
             val raw = globalRaw()
             val output = OciClient().use { client ->
-                val imageRef = client.parseRef(ref)
-                val resolution = client.resolveManifest(imageRef, selector)
-                val artifacts = client.fetchArtifacts(resolution.imageRef)
-                val configBody = artifacts.configs.firstOrNull()
-                check(!configBody.isNullOrBlank()) { "Manifest has no config" }
+                val ref = OciRef.parse(this@ConfigCommand.ref)
+                val imageRef = client.resolveToImageManifest(ref, selector)
+                val config = client.fetchAllMetadata(imageRef).images.single().config
+                check(config!=null) { "Manifest has no config" }
 
-                if (raw) configBody else formatPrettyConfig(configBody)
+                if (raw) config else formatPrettyJson(config)
             }
             println(output)
         }
@@ -236,7 +244,7 @@ class GetCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "ge
     }
 
     private suspend fun queryAndFormat(client: OciClient, raw: Boolean): String {
-        val response = client.fetchUrl(url)
+        val response = client.requestUrl(url, null)
         val body = response.bodyAsText()
         if (raw) return body
 
@@ -269,12 +277,13 @@ class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "t
     }
 
     private suspend fun queryAndFormat(client: OciClient, raw: Boolean): String {
-        if (raw) {
-            val response = client.fetchTags(repositoryRef)
-            return response.bodyAsText()
+        val ref = OciRef.parse(repositoryRef)
+        return if (raw) {
+            val response = client.requestTags(ref)
+            response.bodyAsText()
         } else {
-            val tags = client.fetchTagsList(repositoryRef)
-            return tags.joinToString("\n")
+            val tags = client.fetchTagsList(ref)
+            tags.joinToString("\n")
         }
     }
 }
@@ -334,7 +343,7 @@ fun main(args: Array<String>) {
         ParseCommand().subcommands(
             ParseFormatCommand(name = "index", helpText = "Parse an index from stdin", globalRaw = raw, formatter = { formatTsvIndex(it) }),
             ParseFormatCommand(name = "manifest", helpText = "Parse a manifest from stdin", globalRaw = raw, formatter = { formatTsvManifest(it) }),
-            ParseFormatCommand(name = "config", helpText = "Parse a config from stdin", globalRaw = raw, formatter = { formatPrettyConfig(it) })
+            ParseFormatCommand(name = "config", helpText = "Parse a config from stdin", globalRaw = raw, formatter = { formatPrettyJson(it) })
         ),
         metaCommand.subcommands(
             IndexCommand(globalRaw = raw, meta = { metaCommand }),
@@ -346,16 +355,42 @@ fun main(args: Array<String>) {
 
     try {
         ociFetch.parse(args)
+    } catch (_: PrintHelpMessage) {
+        ociFetch.echo(ociFetch.getFormattedHelp())
+        platform.posix.exit(0)
     } catch (e: CliktError) {
-        if (e is PrintHelpMessage) {
-            ociFetch.echo(ociFetch.getFormattedHelp())
-            platform.posix.exit(0)
-        }
-        ociFetch.echo(e.message ?: "Error: ${e::class.simpleName}", err = true)
+        ociFetch.echo(e.message ?: "Error: command line processing for ${e::class.simpleName}", err = true)
         platform.posix.exit(1)
+    } catch (e: NoSuchPlatformSelectionException) {
+        ociFetch.echo(platformSelectionError(e, e.available), err = true)
+        platform.posix.exit(11)
+    } catch (e: AmbiguousPlatformSelectionException) {
+        ociFetch.echo(platformSelectionError(e, e.candidates), err = true)
+        platform.posix.exit(12)
     } catch (e: Exception) {
-        @OptIn(ExperimentalForeignApi::class)
-        fprintf(stderr, "Error: %s\n", e.message ?: "Unknown error")
-        platform.posix.exit(1)
+        ociFetch.echo("Error: " + (e.message ?: "Unknown error") , err = true)
+        platform.posix.exit(10)
     }
 }
+
+
+private fun platformSelectionError(e: Exception, platforms: Collection<Platform>): String {
+    val options = platforms
+        .asSequence()
+        .filter { it.isValid() }
+        .map { platform -> platform.toCliOptionsString() }
+        .sorted()
+        .distinct()
+        .joinToString("\n")
+
+    return "${e.message}\n\n$options"
+}
+
+private fun Platform.toCliOptionsString(): String = buildString {
+    append("--architecture $arch")
+    append(" --os $osName")
+    variant?.let { append(" --variant $it") }
+    osVersion?.let { append(" --os-version $it") }
+    osFeatures.forEach { append(" --os-features $it") }
+}
+

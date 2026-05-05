@@ -9,6 +9,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.isSuccess
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -38,72 +39,28 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
             "application/vnd.docker.container.image.v1+json",
             "application/octet-stream",
         ).joinToString(",")
-
-        const val EMPTY_REFERRERS_INDEX = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}"""
     }
 
-    override fun parseRef(spec: String, defaultTag: String): ImageRef {
-        // input like: registry-1.docker.io/library/alpine
-        val parts = spec.split('/')
-        require(parts.size >= 2) { "Invalid image reference: $spec" }
-        val registry = parts.first()
-        val repo = parts.drop(1).joinToString("/")
-        val repoParts = repo.split('@', ':')
-        return when {
-            '@' in repo -> {
-                val (r, digest) = repo.split('@', limit = 2)
-                ImageRef(registry, r, digest)
-            }
-            ':' in repo -> {
-                val idx = repo.lastIndexOf(':')
-                val r = repo.substring(0, idx)
-                val tag = repo.substring(idx + 1)
-                ImageRef(registry, r, tag)
-            }
-            else -> ImageRef(registry, repo, defaultTag)
-        }
-    }
-
-    override suspend fun fetchManifest(image: ImageRef): HttpResponse {
-        val url = "https://${image.registry}/v2/${image.repository}/manifests/${image.reference}"
-        return authorizedGet(url, acceptManifest)
-    }
-
-    override suspend fun fetchUrl(url: String): HttpResponse {
-        return authorizedGet(url)
-    }
-
-    override suspend fun fetchTags(repository: String): HttpResponse {
-        // repository is like "library/alpine"
-        // registry is needed, so maybe we should pass ImageRef or just the full spec
-        val parts = repository.split('/', limit = 2)
-        val registry = parts[0]
-        val name = parts.getOrNull(1) ?: ""
-        val url = "https://$registry/v2/$name/tags/list"
-        return authorizedGet(url)
-    }
-
-    override suspend fun fetchTagsList(repository: String): List<String> {
-        val response = fetchTags(repository)
-        check(response.status == HttpStatusCode.OK) { "Failed to fetch tags: ${response.status}" }
-        val body = response.bodyAsText()
-        val json = Json.parseToJsonElement(body).jsonObject
-        return json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-    }
-
-    suspend fun authorizedGet(url: String, acceptHeader: String? = null): HttpResponse {
-        val initial = client.get(url) {
+    override suspend fun requestUrl(url: String, acceptHeader: String?): HttpResponse {
+        val initialResponse = client.get(url) {
             headers {
-                if (acceptHeader != null) header(HttpHeaders.Accept, acceptHeader)
+                acceptHeader?.let { header(HttpHeaders.Accept, it) }
             }
         }
-        if (initial.status != HttpStatusCode.Unauthorized) return initial
+        if (initialResponse.status != HttpStatusCode.Unauthorized) return initialResponse
 
-        val www = initial.headers[HttpHeaders.WWWAuthenticate] ?: return initial
-        val challenge = parseWwwAuthenticate(www)
-        if (!challenge.scheme.equals("Bearer", ignoreCase = true)) return initial
+        // Example: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/alpine:pull"
+        val wwwAuthenticateHeader = initialResponse.headers[HttpHeaders.WWWAuthenticate]
+        checkNotNull(wwwAuthenticateHeader) { "WWW-Authenticate header is missing" }
 
-        val token = fetchBearerToken(challenge.params) ?: return initial
+        val tokenUrl = bearerTokenUrl(wwwAuthenticateHeader)
+        val tokenResponse = client.get(tokenUrl)
+        check(tokenResponse.status == HttpStatusCode.OK) { "Failed to fetch token: ${tokenResponse.status}" }
+
+        val json = Json.parseToJsonElement(tokenResponse.bodyAsText()).jsonObject
+        val token = (json["token"] ?: json["access_token"])?.jsonPrimitive?.content
+        checkNotNull(token) { "Token is missing in response $tokenResponse" }
+
         return client.get(url) {
             headers {
                 if (acceptHeader != null) header(HttpHeaders.Accept, acceptHeader)
@@ -112,218 +69,276 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         }
     }
 
-    suspend fun fetchBlob(registry: String, repository: String, digest: String): HttpResponse {
+    override suspend fun requestBlob(registry: String, repository: String, digest: String): HttpResponse {
         val url = "https://${registry}/v2/${repository}/blobs/${digest}"
-        return authorizedGet(url, acceptConfig)
+        return requestUrl(url, acceptConfig)
     }
 
-    override suspend fun fetchArtifacts(image: ImageRef): FetchedArtifacts {
-        val topResp = fetchManifest(image)
+    override suspend fun requestBlob(image: OciRef): HttpResponse {
+        check(image.isDigest) { "ImageRef must be a digest: $image" }
+        return requestBlob(image.registry, image.repository, image.reference)
+    }
+
+    override suspend fun requestTags(registry: String, repository: String): HttpResponse {
+        val url = "https://$registry/v2/$repository/tags/list"
+        return requestUrl(url)
+    }
+
+    override suspend fun requestTags(image: OciRef): HttpResponse =
+        requestTags(image.registry, image.repository)
+
+    override suspend fun fetchTagsList(image: OciRef): List<String> =
+        parseTagsResponse(requestTags(image))
+
+    override suspend fun fetchTagsList(registry: String, repository: String): List<String> =
+        parseTagsResponse(requestTags(registry, repository))
+
+
+    private suspend fun parseTagsResponse(response: HttpResponse): List<String> {
+        check(response.status == HttpStatusCode.OK) { "Failed to fetch tags: ${response.status}" }
+
+        val body = response.bodyAsText()
+        val json = Json.parseToJsonElement(body).jsonObject
+        return json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+    }
+
+    override suspend fun requestManifest(image: OciRef): HttpResponse =
+        if (image.isDigest) requestBlob(image.registry, image.repository, image.reference)
+        else requestUrl("https://${image.registry}/v2/${image.repository}/manifests/${image.reference}", acceptManifest)
+
+    override suspend fun requestManifest(registry: String, repository: String, tag: String): HttpResponse =
+        requestUrl("https://$registry/v2/$repository/manifests/$tag", acceptManifest)
+
+    override suspend fun fetchAllMetadata(image: OciRef): ImageIndexArtifacts {
+        val topResp = requestManifest(image)
         val topBody = topResp.bodyAsText()
         val contentType = topResp.headers[HttpHeaders.ContentType] ?: ""
 
         // Determine if top-level is an index (manifest list) or a single image manifest
-        val topJson = runCatching { Json.parseToJsonElement(topBody).jsonObject }.getOrNull()
-        val isIndex = isIndexContent(contentType, topJson)
+        val topJson = Json.parseToJsonElement(topBody).jsonObject
+        val indexContent = isOciImageIndex(topJson, contentType)
 
-        return if (isIndex && topJson != null) {
-            val manifestsArray = topJson["manifests"]?.jsonArray ?: emptyList()
-            val imageManifests = mutableListOf<String>()
-            val configs = mutableListOf<String>()
+        return if (indexContent) {
+            val listManifests = topJson["manifests"]?.jsonArray ?: emptyList()
+            val images = listManifests
+                .mapNotNull { it.jsonObject["digest"]?.jsonPrimitive?.content }
+                .map { digest ->
+                    val manifestRef = image.withDigest(digest)
+                    val manifestResponse = requestManifest(manifestRef)
+                    check(manifestResponse.status == HttpStatusCode.OK) { "Failed to fetch manifest: ${manifestResponse.status}" }
+                    val manifestJson = Json.parseToJsonElement(manifestResponse.bodyAsText()).jsonObject
 
-            // For each entry, fetch the image manifest by digest
-            for (entry in manifestsArray) {
-                val digest = runCatching { entry.jsonObject["digest"]?.jsonPrimitive?.content }
-                    .getOrNull()
-                if (digest.isNullOrBlank()) continue
-                val mResp = authorizedGet("https://${image.registry}/v2/${image.repository}/manifests/${digest}", acceptManifest)
-                val mBody = mResp.bodyAsText()
-                imageManifests.add(mBody)
-                // Parse config digest and fetch config blob
-                val mJson = runCatching { Json.parseToJsonElement(mBody).jsonObject }.getOrNull()
-                val cfgDigest = runCatching { mJson?.get("config")?.jsonObject?.get("digest")?.jsonPrimitive?.content }
-                    .getOrNull()
-                if (!cfgDigest.isNullOrBlank()) {
-                    val cResp = fetchBlob(image.registry, image.repository, cfgDigest)
-                    val cBody = cResp.bodyAsText()
-                    configs.add(cBody)
-                } else {
-                    // keep positions aligned; add empty string if config missing
-                    configs.add("")
+                    val configDigest = manifestJson["config"]?.jsonObject?.get("digest")?.jsonPrimitive?.content
+                    val configJson = if (configDigest != null) {
+                        val configResponse = requestBlob(manifestRef.withDigest(configDigest))
+                        check(configResponse.status == HttpStatusCode.OK) { "Failed to fetch config blob: ${configResponse.status}" }
+                        Json.parseToJsonElement(configResponse.bodyAsText()).jsonObject
+                    } else {
+                        null
+                    }
+                    ImageArtifacts(manifestRef, manifestJson, configJson)
                 }
-            }
-            FetchedArtifacts(listManifest = topBody, imageManifests = imageManifests, configs = configs)
+
+            ImageIndexArtifacts(image, index = topJson, images)
         } else {
-            // Single image manifest path
-            val imageManifestBody = topBody
-            val imageManifests = listOf(imageManifestBody)
-            val mJson = runCatching { Json.parseToJsonElement(imageManifestBody).jsonObject }.getOrNull()
-            val cfgDigest = runCatching { mJson?.get("config")?.jsonObject?.get("digest")?.jsonPrimitive?.content }
-                .getOrNull()
-            val configs = if (!cfgDigest.isNullOrBlank()) {
-                val cResp = fetchBlob(image.registry, image.repository, cfgDigest)
-                listOf(cResp.bodyAsText())
-            } else emptyList()
-            FetchedArtifacts(listManifest = null, imageManifests = imageManifests, configs = configs)
-        }
-    }
-
-    override fun isIndexContent(contentType: String, json: JsonObject?): Boolean {
-        val ct = contentType.lowercase()
-        if (ct.contains("application/vnd.oci.image.index.v1+json")) return true
-        if (ct.contains("application/vnd.docker.distribution.manifest.list.v2+json")) return true
-        // Fallback to structure check
-        val hasManifests = json?.get("manifests") is JsonArray
-        return hasManifests
-    }
-
-    override fun isManifestContent(json: JsonObject?): Boolean =
-        listOf("layer", "config", "subject", "fsLayers").any { json?.containsKey(it) ?: false }
-
-    suspend fun fetchBearerToken(params: Map<String, String>): String? {
-        val realm = params["realm"] ?: return null
-        // Preserve service and scope; commonly included in the 401 challenge
-        val service = params["service"]
-        val scope = params["scope"]
-        val query = buildList {
-            if (service != null) add("service=" + urlEncode(service))
-            if (scope != null) add("scope=" + urlEncode(scope))
-        }.joinToString("&")
-        val url = if (query.isNotEmpty()) "$realm?$query" else realm
-
-        val resp = client.get(url)
-        if (resp.status != HttpStatusCode.OK) return null
-        val body = resp.bodyAsText()
-        val json = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
-        val token = json["token"]?.jsonPrimitive?.content
-        val access = json["access_token"]?.jsonPrimitive?.content
-        return token ?: access
-    }
-
-    fun parseWwwAuthenticate(header: String): Challenge {
-        // Example: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/alpine:pull"
-        val parts = header.split(" ", limit = 2)
-        val scheme = parts.firstOrNull()?.trim() ?: ""
-        val paramStr = parts.getOrNull(1) ?: ""
-        val params = mutableMapOf<String, String>()
-        for (segment in paramStr.split(',')) {
-            val kv = segment.split('=', limit = 2)
-            if (kv.size == 2) {
-                val key = kv[0].trim().trim('"')
-                val value = kv[1].trim().trim('"')
-                if (key.isNotEmpty()) params[key] = value
+            // topJson is a single image manifest, fetch config blob if present
+            val configDigest = topJson["config"]?.jsonObject?.get("digest")?.jsonPrimitive?.content
+            val config = configDigest?.let { digest ->
+                val configResponse = requestBlob(image.registry, image.repository, digest)
+                check(configResponse.status == HttpStatusCode.OK) { "Failed to fetch config blob: ${configResponse.status}" }
+                Json.parseToJsonElement(configResponse.bodyAsText()).jsonObject
             }
+            ImageIndexArtifacts(image, index = null, listOf(ImageArtifacts(image, topJson, config)))
         }
-        return Challenge(scheme, params)
     }
 
-    data class Challenge(val scheme: String, val params: Map<String, String>)
+    override suspend fun fetchReferrers(subject: OciRef, artifactType: String?): JsonObject =
+        referrersOciApi(subject, artifactType) ?:        // If we got results from Referrers API, we are done (per OCI spec).
+        referrersCosignConvention(subject, artifactType) // Tag schema fallback and Cosign-style tags
+
+    override suspend fun scrapeReferrers(
+        subject: OciRef,
+        regex: String,
+        artifactType: String?,
+    ): JsonObject {
+        check(subject.isDigest) { "Scraping requires a digest-based reference" }
+        val pattern = Regex(regex)
+
+        val tags = fetchTagsList(subject)
+        val matchingTags = tags.filter { pattern.containsMatchIn(it) }
+        val referrers = matchingTags.flatMap { tag ->
+            val ref = subject.withTag(tag)
+            val resp = requestManifest(ref)
+            if (resp.status != HttpStatusCode.OK) return@flatMap emptyList()
+
+            val body = resp.bodyAsText()
+            val json = try {
+                Json.parseToJsonElement(body).jsonObject
+            } catch (_: SerializationException) {
+                return@flatMap emptyList()
+            }
+
+            val subjectDigest = json["subject"]?.jsonObject?.get("digest")?.jsonPrimitive?.content
+            if (subjectDigest != subject.reference) return@flatMap emptyList()
+
+            val foundArtifactType = json["artifactType"]?.jsonPrimitive?.content != artifactType
+            if (artifactType != null && foundArtifactType) return@flatMap emptyList()
+
+            val bodyBytes = body.encodeToByteArray()
+            val bodyDigest = SHA256().digest(bodyBytes).toHexString()
+            val foundDigest = resp.headers["Docker-Content-Digest"] ?: "sha256:$bodyDigest"
+            val size = resp.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: bodyBytes.size
+            val mediaType = json["mediaType"]?.jsonPrimitive?.contentOrNull
+                ?: resp.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim()
+                ?: ""
+            val descriptor = mutableMapOf<String, JsonElement>(
+                "digest" to JsonPrimitive(foundDigest),
+                "mediaType" to JsonPrimitive(mediaType),
+                "size" to JsonPrimitive(size),
+            )
+            json["artifactType"]?.let { descriptor["artifactType"] = it }
+            json["annotations"]?.let { descriptor["annotations"] = it }
+
+            return@flatMap listOf(JsonObject(descriptor))
+        }
+
+        // Constructs and serializes OCI image index with referrers
+        return JsonObject(
+            mapOf(
+                "schemaVersion" to JsonPrimitive(2),
+                "mediaType" to JsonPrimitive("application/vnd.oci.image.index.v1+json"),
+                "manifests" to JsonArray(referrers),
+            )
+        )
+    }
+
+    override suspend fun resolveToImageManifest(image: OciRef, selector: PlatformSelector): OciRef {
+        val response = requestManifest(image)
+        require(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
+
+        val body = response.bodyAsText()
+        val contentType = response.headers[HttpHeaders.ContentType] ?: ""
+        val json = Json.parseToJsonElement(body).jsonObject
+
+        return when {
+            isOciImageManifest(json) -> validateResolvedManifest(image, selector)
+            isOciImageIndex(json, contentType) -> {
+                val imageManifests = json["manifests"]?.jsonArray ?: error("Index has no manifests")
+
+                val allPlatforms = imageManifests
+                    .mapNotNull { it.jsonObject["platform"]?.jsonObject }
+                    .map { Platform.fromJson(it) }
+
+
+                val selectedImageManifest = try {
+                    imageManifests.single {
+                        selector.matches(it.jsonObject["platform"]?.jsonObject)
+                    }
+                } catch (e: NoSuchElementException) {
+                    throw NoSuchPlatformSelectionException(
+                        "No manifests found matching the specified constraints",
+                        allPlatforms.filter { it.isValid() }, selector, e
+                    )
+                } catch (e: IllegalArgumentException) {
+                    throw AmbiguousPlatformSelectionException(
+                        "Multiple manifests found matching the specified constraints",
+                        allPlatforms.filter { selector.matches(it) }, selector, e
+                    )
+                }
+
+                val imageDigest = requireNotNull(selectedImageManifest.jsonObject["digest"]?.jsonPrimitive?.content) {
+                    "Selected manifest entry has no digest"
+                }
+
+                val manifestRef = image.withDigest(imageDigest)
+                validateResolvedManifest(manifestRef, selector) // just in case, make sure the image is consistent with the index
+            }
+
+            else -> error("Reference points to neither an index nor a manifest (Content-Type: $contentType)")
+        }
+    }
 
     override fun close() {
         if (!externallyManaged) client.close()
     }
 
-    override suspend fun fetchReferrers(
-        image: ImageRef,
-        digest: String,
-        artifactType: String?,
-        scrapeRegex: String?
-    ): String {
-        if (scrapeRegex != null) {
-            return scrapeReferrers(image, digest, scrapeRegex, artifactType)
+    override fun isOciImageIndex(json: JsonObject?, contentType: String): Boolean = when {
+        contentType.contains("application/vnd.oci.image.index.v1+json", true) -> true
+        contentType.contains("application/vnd.docker.distribution.manifest.list.v2+json", true) -> true
+        else -> json != null && json["manifests"] is JsonArray
+    }
+
+    override fun isOciImageManifest(json: JsonObject?): Boolean =
+        listOf("layer", "config", "subject", "fsLayers").any { json?.containsKey(it) ?: false }
+
+    private suspend fun validateResolvedManifest(image: OciRef, selector: PlatformSelector): OciRef {
+        if (!selector.hasConstraints()) return image // shortcut expensive validation
+
+        val artifacts = fetchAllMetadata(image)
+        require(artifacts.images.size == 1) { "Expected exactly one resolved image, got ${artifacts.images.size}" }
+        artifacts.images.first().config.let {
+            requireNotNull(it) { "Could not fetch config to verify platform constraints" }
+            require(selector.matches(it)) { "Manifest does not match platform constraints" }
+        }
+        return image
+    }
+
+    fun bearerTokenUrl(wwwAuthenticateHeader: String): String {
+        check(wwwAuthenticateHeader.contains(" ")) {
+            "WWW-Authenticate header is missing schema: $wwwAuthenticateHeader"
         }
 
-        // 1. OCI Referrers API
-        val apiUrl = "https://${image.registry}/v2/${image.repository}/referrers/$digest"
-        val query = if (artifactType != null) "?artifactType=${urlEncode(artifactType)}" else ""
-        val response = authorizedGet(apiUrl + query, "application/vnd.oci.image.index.v1+json")
+        // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/WWW-Authenticate
+        val (schema, params) = wwwAuthenticateHeader.split(" ", limit = 2).map { it.trim() }
+        val challengeParams: Map<String, String> = params
+            .split(',')
+            .map { kvStr -> kvStr.split('=', limit = 2).map { it.trim('"') } }
+            .filter { it.size == 2 && it[0].isNotEmpty() }
+            .associate { it[0] to it[1] }
 
-        if (response.status == HttpStatusCode.OK) {
-            val body = response.bodyAsText()
-            val finalBody = if (artifactType == null) {
-                body
-            } else {
-                val filtersApplied = response.headers["OCI-Filters-Applied"] ?: ""
-                val serverFilteredArtifactType = filtersApplied
-                    .split(',')
-                    .map { it.trim() }
-                    .any { it.equals("artifactType", ignoreCase = true) }
-                if (serverFilteredArtifactType) body else filterByArtifactType(body, artifactType)
-            }
+        val tokenUrlRealm = challengeParams["realm"]
+        val tokenUrlParams = challengeParams
+            .filterKeys { it != "realm" }
+            .map { (k, v) -> "$k=${urlEncode(v)}" }
+            .joinToString("&")
 
-            // If we got results from Referrers API, we are done (per OCI spec).
-            // However, some registries (like Quay) might support Referrers API but return empty,
-            // while still having Cosign tags.
-            // We only fall back if the Referrers API returned an empty list OR 404.
-            val json = Json.parseToJsonElement(finalBody).jsonObject
-            val manifests = json["manifests"]?.jsonArray
-            if (manifests != null && manifests.isNotEmpty()) {
-                return finalBody
-            }
-            // If empty, fall through to tag-schema and Cosign discovery
-        } else {
-            require(response.status == HttpStatusCode.NotFound) { "Referrers API returned ${response.status} for $apiUrl$query" }
+        check(tokenUrlRealm != null) { "Realm is missing in WWW-Authenticate header: $wwwAuthenticateHeader" }
+        check(tokenUrlRealm.isNotEmpty()) { "Realm is empty in WWW-Authenticate header: $wwwAuthenticateHeader" }
+        check(schema.equals("Bearer", ignoreCase = true)) { "Schema is not Bearer (the only one supported): $wwwAuthenticateHeader" }
+        return when {
+            tokenUrlParams.isEmpty() -> tokenUrlRealm
+            else -> "$tokenUrlRealm?$tokenUrlParams"
         }
+    }
 
-        // 2. Tag Schema Fallback and Cosign-style tags
-        val tagBase = digest.replace(":", "-")
-        val possibleTags = listOf(tagBase, "$tagBase.sig", "$tagBase.att", "$tagBase.sbom")
-
-        val discoveredManifests = mutableListOf<JsonObject>()
-
-        for (tag in possibleTags) {
-            val tagResponse = authorizedGet("https://${image.registry}/v2/${image.repository}/manifests/$tag", "application/vnd.oci.image.index.v1+json")
-            if (tagResponse.status == HttpStatusCode.OK) {
-                val body = tagResponse.bodyAsText()
-                val contentType = tagResponse.headers[HttpHeaders.ContentType] ?: ""
-                val json = Json.parseToJsonElement(body).jsonObject
-
-                if (isIndexContent(contentType, json)) {
-                    // It's an index (OCI Referrers Tag Schema), add its manifests
-                    val manifests = json["manifests"]?.jsonArray
-                    manifests?.forEach { discoveredManifests.add(it.jsonObject) }
-                } else if (isManifestContent(json)) {
-                    // It's a single manifest (Cosign style), convert to descriptor and add
-                    val bodyBytes = body.encodeToByteArray()
-                    val mDigest = tagResponse.headers["Docker-Content-Digest"] ?: ("sha256:" + SHA256().digest(bodyBytes).toHexString())
-                    val size = tagResponse.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: bodyBytes.size.toLong()
-
-                    var mediaType = json["mediaType"]?.jsonPrimitive?.contentOrNull
-                        ?: tagResponse.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim()
-                        ?: ""
-
-                    // Fallback for Docker v1 (schemaVersion 1)
-                    if (mediaType.isEmpty() || mediaType == "application/json") {
-                        if (json.containsKey("fsLayers")) {
-                            mediaType = "application/vnd.docker.distribution.manifest.v1+json"
-                        } else {
-                            mediaType = "application/vnd.oci.image.manifest.v1+json"
-                        }
+    private suspend fun referrersCosignConvention(ref: OciRef, artifactType: String?): JsonObject {
+        check(ref.isDigest) { "Referrers API requires a digest-based reference" }
+        val digest = ref.reference.replace(":", "-")
+        val cosignTags = listOf("", ".sig", ".att", ".sbom").map { digest + it }
+        val discoveredManifests = cosignTags
+            .flatMap { tag ->
+                val response = requestManifest(ref.withTag(tag))
+                if (response.status != HttpStatusCode.OK) {
+                    require(response.status == HttpStatusCode.NotFound) {
+                        "Referrers tag-schema fallback returned unexpected ${response.status} for $tag"
                     }
+                    emptyList()
+                } else {
+                    require(response.status == HttpStatusCode.OK)
+                    val contentType = response.headers[HttpHeaders.ContentType] ?: ""
+                    val body = response.bodyAsText()
+                    val json = Json.parseToJsonElement(body).jsonObject
+                    when {
+                        // It's an index (OCI Referrers Tag Schema), add its manifests
+                        isOciImageIndex(json, contentType) -> json["manifests"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
 
-                    val descriptor = mutableMapOf<String, JsonElement>()
-                    descriptor["digest"] = JsonPrimitive(mDigest)
-                    descriptor["mediaType"] = JsonPrimitive(mediaType)
-                    descriptor["size"] = JsonPrimitive(size)
+                        // It's a single manifest (Cosign style), convert to descriptor and add
+                        isOciImageManifest(json) -> listOf(JsonObject(surrogateManifestCosign(body, response, json, tag)))
 
-                    val artifactType = json["artifactType"]?.jsonPrimitive?.contentOrNull ?: when {
-                        tag.endsWith(".sig") -> "application/vnd.dev.cosign.simplesigning.v1+json"
-                        tag.endsWith(".att") -> "application/vnd.dsse.envelope.v1+json"
-                        tag.endsWith(".sbom") -> "text/spdx+json"
-                        else -> null
+                        else -> emptyList()
                     }
-                    if (artifactType != null) {
-                        descriptor["artifactType"] = JsonPrimitive(artifactType)
-                    }
-
-                    json["annotations"]?.let { descriptor["annotations"] = it }
-
-                    discoveredManifests.add(JsonObject(descriptor))
                 }
-            } else {
-                require(tagResponse.status == HttpStatusCode.NotFound) { "Referrers tag-schema fallback returned ${tagResponse.status} for $tag" }
             }
-        }
 
         val filteredManifests = if (artifactType == null) {
             discoveredManifests
@@ -338,156 +353,112 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         resultIndex["mediaType"] = JsonPrimitive("application/vnd.oci.image.index.v1+json")
         resultIndex["manifests"] = JsonArray(filteredManifests.map { JsonObject(it) })
 
-        return JsonObject(resultIndex).toString()
+        return JsonObject(resultIndex)
     }
 
-    /** Returns a copy of the referrers index body with `manifests` filtered to entries matching `artifactType`. */
-    private fun filterByArtifactType(body: String, artifactType: String): String {
-        val json = Json.parseToJsonElement(body).jsonObject
-        val manifests = json["manifests"]?.jsonArray?.filter {
-            it.jsonObject["artifactType"]?.jsonPrimitive?.content == artifactType
-        } ?: emptyList()
-        return JsonObject(json + ("manifests" to JsonArray(manifests))).toString()
-    }
+    private fun surrogateManifestCosign(body: String, tagResponse: HttpResponse, json: JsonObject, tag: String): MutableMap<String, JsonElement> {
+        val bodyBytes = body.encodeToByteArray()
 
-    private suspend fun scrapeReferrers(
-        image: ImageRef,
-        targetDigest: String,
-        regex: String,
-        artifactType: String?
-    ): String {
-        val pattern = Regex(regex)
-
-        val tags = fetchTagsList(image.registry + "/" + image.repository)
-        val matchingTags = tags.filter { pattern.containsMatchIn(it) }
-        val referrers = matchingTags.flatMap { tag ->
-            val ref = image.copy(reference = tag)
-            val resp = fetchManifest(ref)
-            if (resp.status != HttpStatusCode.OK) return@flatMap emptyList()
-
-            val body = resp.bodyAsText()
-            val json = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return@flatMap emptyList()
-
-            val subject = json["subject"]?.jsonObject
-            val subjectDigest = subject?.get("digest")?.jsonPrimitive?.content
-
-            if (subjectDigest == targetDigest) return@flatMap emptyList()
-            if (artifactType != null && json["artifactType"]?.jsonPrimitive?.content != artifactType) return@flatMap emptyList()
-
-            val bodyBytes = body.encodeToByteArray()
-            val bodyDigest = SHA256().digest(bodyBytes).toHexString()
-            val digest = resp.headers["Docker-Content-Digest"] ?: "sha256:$bodyDigest"
-            val size = resp.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: bodyBytes.size
-            val mediaType = json["mediaType"]?.jsonPrimitive?.contentOrNull
-                ?: resp.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim()
-                ?: ""
-            val descriptor = mutableMapOf<String, JsonElement>(
-                "digest" to JsonPrimitive(digest),
-                "mediaType" to JsonPrimitive(mediaType),
-                "size" to JsonPrimitive(size),
-            )
-            json["artifactType"]?.let { descriptor["artifactType"] = it }
-            json["annotations"]?.let { descriptor["annotations"] = it }
-
-            return@flatMap listOf(JsonObject(descriptor))
-        }
-
-        // Constructs and serializes OCI image index with referrers
-        return JsonObject(mapOf(
-            "schemaVersion" to JsonPrimitive(2),
-            "mediaType" to JsonPrimitive("application/vnd.oci.image.index.v1+json"),
-            "manifests" to JsonArray(referrers),
-        )).toString()
-    }
-
-    override suspend fun resolveManifest(image: ImageRef, selector: PlatformSelector): ManifestResolution {
-        val response = fetchManifest(image)
-        require(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
-
-        val body = response.bodyAsText()
-        val contentType = response.headers[HttpHeaders.ContentType] ?: ""
-        val json = Json.parseToJsonElement(body).jsonObject
-
-        return when {
-            isIndexContent(contentType, json) -> {
-                val selectedDigest = selectManifestFromIndex(json, selector)
-                val manifestRef = image.copy(reference = selectedDigest)
-                val manifestResponse = fetchManifest(manifestRef)
-                require(manifestResponse.status.isSuccess()) {
-                    "Failed to fetch matched manifest: ${manifestResponse.status}"
-                }
-                ManifestResolution(
-                    body = manifestResponse.bodyAsText(),
-                    digest = selectedDigest,
-                    contentType = manifestResponse.headers[HttpHeaders.ContentType] ?: "",
-                    imageRef = manifestRef
-                )
-            }
-            isManifestContent(json) -> {
-                val configDigest = validateResolvedManifest(json, selector, image)
-                ManifestResolution(
-                    body = body,
-                    digest = response.headers["Docker-Content-Digest"] ?: configDigest ?: "",
-                    contentType = contentType,
-                    imageRef = image
-                )
-            }
-            else -> error("Reference points to neither an index nor a manifest (Content-Type: $contentType)")
-        }
-    }
-
-    private suspend fun validateResolvedManifest(json: JsonObject, selector: PlatformSelector, image: ImageRef): String? {
-        // Already a manifest, check constraints
-        val configDigest = json["config"]?.jsonObject?.get("digest")?.jsonPrimitive?.content
-        if (selector.hasConstraints()) {
-            requireNotNull(configDigest) {
-                "Reference points to a manifest but it lacks platform information to verify constraints"
-            }
-
-            val artifacts = fetchArtifacts(image)
-            val configBody = artifacts.configs.firstOrNull()
-            require(!configBody.isNullOrBlank()) {
-                "Could not fetch config to verify platform constraints"
-            }
-            val configJson = Json.parseToJsonElement(configBody).jsonObject
-            require(selector.matches(configJson)) {
-                "Manifest does not match platform constraints"
+        var mediaType = json["mediaType"]?.jsonPrimitive?.contentOrNull
+            ?: tagResponse.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim()
+            ?: ""
+        if (mediaType.isEmpty() || mediaType == "application/json") {
+            mediaType = if (json.containsKey("fsLayers")) {
+                // Fallback for Docker v1 (schemaVersion 1)
+                "application/vnd.docker.distribution.manifest.v1+json"
+            } else {
+                "application/vnd.oci.image.manifest.v1+json"
             }
         }
-        return configDigest
-    }
 
-    private fun selectManifestFromIndex(json: JsonObject, selector: PlatformSelector): String {
-        val manifests = json["manifests"]?.jsonArray ?: error("Index has no manifests")
-        val matches = manifests.filter { selector.matches(it.jsonObject["platform"]?.jsonObject) }
-        require(matches.isNotEmpty()) { "No manifest found matching the specified constraints" }
-        require(matches.size <= 1) { errorMessageWithCmdLineOptions(matches) }
-
-        val selectedDigest = requireNotNull(matches.first().jsonObject["digest"]?.jsonPrimitive?.content) {
-            "Selected manifest entry has no digest"
+        val artifactType = json["artifactType"]?.jsonPrimitive?.contentOrNull ?: when {
+            tag.endsWith(".sig") -> "application/vnd.dev.cosign.simplesigning.v1+json"
+            tag.endsWith(".att") -> "application/vnd.dsse.envelope.v1+json"
+            tag.endsWith(".sbom") -> "text/spdx+json"
+            else -> null
         }
-        return selectedDigest
+
+        val digest = tagResponse.headers["Docker-Content-Digest"] ?: ("sha256:" + SHA256().digest(bodyBytes).toHexString())
+        val size = tagResponse.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: bodyBytes.size.toLong()
+        val annotations = json["annotations"]
+
+        val descriptor = mutableMapOf<String, JsonElement>(
+            "digest" to JsonPrimitive(digest),
+            "mediaType" to JsonPrimitive(mediaType),
+            "size" to JsonPrimitive(size),
+        )
+        artifactType?.let { descriptor["artifactType"] = JsonPrimitive(it) }
+        annotations?.let { descriptor["annotations"] = it }
+
+        return descriptor
     }
 
-    private fun errorMessageWithCmdLineOptions(matches: List<JsonElement>): String {
-        val options = matches.mapNotNull { entry ->
-            // Extracts platform details; builds distinct CLI options for matches
-            val platform = entry.jsonObject["platform"]?.jsonObject ?: return@mapNotNull null
-            val arch = platform["architecture"]?.jsonPrimitive?.content ?: ""
-            val osName = platform["os"]?.jsonPrimitive?.content ?: ""
-            val osVer = platform["os.version"]?.jsonPrimitive?.content
-            val variantStr = platform["variant"]?.jsonPrimitive?.content
-            val features = platform["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-            if (arch == "unknown" || osName == "unknown") return@mapNotNull null
-            buildString {
-                append("--architecture $arch --os $osName")
-                osVer?.let { append(" --os-version $it") }
-                variantStr?.let { append(" --variant $it") }
-                features.forEach { append(" --os-features $it") }
-            }
-        }.distinct().joinToString("\n")
+    /**
+     * Returns an index of referrers of the specified type.
+     * If OCI Referrers API is not supported or returns an empty index,
+     * return null to indicate that fallback methods should be attempted.
+     */
+    private suspend fun referrersOciApi(ref: OciRef, artifactType: String?): JsonObject? {
+        check(ref.isDigest) { "Referrers API requires a digest-based reference" }
+        val apiUrl = "https://${ref.registry}/v2/${ref.repository}/referrers/${ref.reference}"
+        val query = if (artifactType != null) "?artifactType=${urlEncode(artifactType)}" else ""
+        val response = requestUrl(apiUrl + query, "application/vnd.oci.image.index.v1+json")
 
-        return "Multiple manifests found matching the specified constraints\n\n$options"
+        if (response.status != HttpStatusCode.OK) {
+            // We only fall back if the Referrers API returned an empty list OR 404.
+            require(response.status == HttpStatusCode.NotFound) {
+                "Referrers API returned ${response.status} for $apiUrl$query"
+            }
+            return null
+        }
+
+        val text = if (artifactType == null) {
+            response.bodyAsText()
+        } else {
+            val filtersAppliedHeader = response.headers["OCI-Filters-Applied"]
+            clientSideArtifactTypeFilter(response.bodyAsText(), artifactType, filtersAppliedHeader)
+        }
+
+        // However, some registries (like Quay) might support Referrers API but return empty,
+        // while still having Cosign tags.
+        val json = Json.parseToJsonElement(text).jsonObject
+        return if (!json["manifests"]?.jsonArray.isNullOrEmpty()) json else null
+        // If empty, fall through to tag-schema and Cosign discovery
+    }
+
+    /**
+     * Filters the artifact list in the response based on the given artifact type.
+     * If the server has already applied the artifactType filter, the body is returned as-is.
+     * Otherwise, it applies a client-side filter to the body.
+     *
+     * According to the OCI Distribution Spec, the Referrers API supports an optional `artifactType` query parameter
+     * to filter results server-side. However, not all OCI-compliant registries implement this parameter correctly.
+     * 
+     * Some registries may ignore the query parameter entirely, while others may acknowledge it via the 
+     * `OCI-Filters-Applied` response header. To ensure consistent behavior across different registry implementations,
+     * this method checks if the server actually applied the filter (via the `OCI-Filters-Applied: artifactType` header).
+     * If the header is absent or doesn't indicate server-side filtering, we perform client-side filtering to ensure
+     * the returned artifacts match the requested type. This defensive approach provides compatibility with both
+     * compliant and non-compliant registry implementations.
+     * 
+     * @param body The raw body of the response, typically in JSON format, containing the list of artifacts.
+     * @param artifactType The type of artifact to filter by, used for client-side filtering if needed.
+     * @param filtersApplied The value of the OCI-Filters-Applied header, indicating which filters the server applied.
+     * @return A JSON string containing the filtered list of artifacts, based on the artifact type.
+     */
+    private fun clientSideArtifactTypeFilter(body: String, artifactType: String, filtersApplied: String?): String = when {
+        // the server has already done the filtering by artifactType - pass through the literal response
+        filtersApplied != null && filtersApplied.split(',').any { it.trim().equals("artifactType", ignoreCase = true) } -> body
+
+        // filter manually, since the server doesn't support artifactType query param or header is missing
+        else -> {
+            val json = Json.parseToJsonElement(body).jsonObject
+            val filteredManifests = json["manifests"]?.jsonArray?.filter {
+                it.jsonObject["artifactType"]?.jsonPrimitive?.content == artifactType
+            }
+            val overrideManifests = "manifests" to JsonArray(filteredManifests ?: emptyList())
+            JsonObject(json + overrideManifests).toString()
+        }
     }
 
 }

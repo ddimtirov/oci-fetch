@@ -2,72 +2,101 @@ package oci
 
 import io.ktor.client.HttpClient
 import io.ktor.client.statement.HttpResponse
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonObject
 
 /**
- * Minimal OCI Registry client for fetching image manifests.
- * Handles Bearer token challenge (WWW-Authenticate) and retries the request.
- * 
- * Multiplatform implementation supporting JVM, JS, Native (Windows/Linux), and WASM.
+ * Represents a client for interacting with an OCI (Open Container Initiative) registry.
+ * Provides methods for performing common OCI image and manifest operations such as
+ * fetching blobs, tags, manifests, and resolving image references.
+ *
+ * Inherits from AutoCloseable, so it can be closed to release any associated resources.
  */
 interface OciClient : AutoCloseable {
     /**
-     * Fetches the given URL using OCI-compatible authentication if needed.
+     * Requests a GET response from the specified URL,
+     * handling anonymous Bearer-Token authentication if necessary.
      */
-    suspend fun fetchUrl(url: String): HttpResponse
+    suspend fun requestUrl(url: String, acceptHeader: String? = null): HttpResponse
 
     /**
-     * Fetches the manifest for the given image reference.
+     * Requests a GET response for a blob from the specified image reference.
      */
-    suspend fun fetchManifest(image: ImageRef): HttpResponse
+    suspend fun requestBlob(image: OciRef): HttpResponse
+    /**
+     * Requests a GET response for a blob from the specified registry and repository.
+     */
+    suspend fun requestBlob(registry: String, repository: String, digest: String): HttpResponse
 
     /**
-     * Fetches referrers for the given image digest using various mechanisms.
+     * Requests a GET response for a tags-list from the specified image reference.
      */
-    suspend fun fetchReferrers(
-        image: ImageRef,
-        digest: String,
-        artifactType: String? = null,
-        scrapeRegex: String? = null
-    ): String
+    suspend fun requestTags(image: OciRef): HttpResponse
+    /**
+     * Requests a GET response for a tags-list from the specified registry and repository.
+     */
+    suspend fun requestTags(registry: String, repository: String): HttpResponse
 
     /**
-     * Fetches manifest/index, image manifests, and matching configs.
-     * Keeps JSON bodies as text; parses minimally to discover digests.
+     * Requests a GET response for a manifest (image or index) from the specified reference.
      */
-    suspend fun fetchArtifacts(image: ImageRef): FetchedArtifacts
+    suspend fun requestManifest(image: OciRef): HttpResponse
+    /**
+     * Requests a GET response for a manifest (image or index)
+     * from the specified registry, repository, and optionally - tag (defaults to 'latest').
+     */
+    suspend fun requestManifest(registry: String, repository: String, tag: String ="latest"): HttpResponse
 
     /**
-     * Fetches tags for the given repository.
+     * Returns all tags for the given image reference.
      */
-    suspend fun fetchTags(repository: String): HttpResponse
+    suspend fun fetchTagsList(image: OciRef): List<String>
+    /**
+     * Returns all tags for the given registry and repository.
+     */
+    suspend fun fetchTagsList(registry: String, repository: String): List<String>
 
     /**
-     * Fetches tags for the given repository and returns them as a list of strings.
+     * Fetches all manifest and config blobs for the given image reference.
+     * If the top-level manifest is an index (manifest list), it will fetch all contained images.
      */
-    suspend fun fetchTagsList(repository: String): List<String>
+    suspend fun fetchAllMetadata(image: OciRef): ImageIndexArtifacts
+
+    /**
+     * Returns the referrers for a specific repository using the OCI Referrers API,
+     * falling back to Cosign tag-schema if unsupported or empty.
+     *
+     * @param subject The subject as a digest-based `ImageRef` object.
+     * @param artifactType The optional artifact type to filter referrers by.
+     * @return A JSON representing the referrers, constructed as an OCI image index.
+     */
+    suspend fun fetchReferrers(subject: OciRef, artifactType: String? = null): JsonObject
+
+    /**
+     * Returns the manifests pointing to a target digest by retrieving and checking
+     * the manifests of all tags matching a regex, whether they point to the subject.
+     *
+     * @param subject The subject as a digest-based `ImageRef` object.
+     * @param regex identifying which tags to scrape.
+     * @param artifactType The optional artifact type to filter referrers by.
+     * @return A JSON representing the referrers, constructed as an OCI image index.
+     */
+    suspend fun scrapeReferrers(subject: OciRef, regex: String, artifactType: String?=null): JsonObject
+
+    /**
+     * Resolves a reference to a specific image manifest based on platform constraints.
+     * If the reference is an index, it follows it using the selector.
+     */
+    suspend fun resolveToImageManifest(image: OciRef, selector: PlatformSelector): OciRef
 
     /**
      * Determines if the given content type and JSON body represent an OCI index or manifest list.
      */
-    fun isIndexContent(contentType: String, json: JsonObject?): Boolean
+    fun isOciImageIndex(json: JsonObject?, contentType: String): Boolean
 
     /**
-     * Determines if the given JSON body represents an OCI manifest.
+     * Determines if the given JSON body represents an OCI image manifest.
      */
-    fun isManifestContent(json: JsonObject?): Boolean
-
-    /**
-     * Resolves an image reference to a specific manifest based on platform constraints.
-     * If the reference is an index, it follows it using the selector.
-     */
-    suspend fun resolveManifest(image: ImageRef, selector: PlatformSelector): ManifestResolution
-
-    /**
-     * Parses an image reference string into an ImageRef.
-     * Example: registry-1.docker.io/library/alpine:latest
-     */
-    fun parseRef(spec: String, defaultTag: String = "latest"): ImageRef
+    fun isOciImageManifest(json: JsonObject?): Boolean
 
     companion object {
         /**

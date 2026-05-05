@@ -2,7 +2,6 @@ package oci
 
 import io.ktor.http.HttpStatusCode
 import io.ktor.client.statement.bodyAsText
-import io.ktor.http.Headers
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -18,8 +17,8 @@ class OciAuthAndFetchTest {
         OciClient().use { client ->
             if (isBrowser() || isNative()) return@use
 
-            val ref = client.parseRef(spec)
-            val resp = client.fetchManifest(ref)
+            val ref = OciRef.parse(spec)
+            val resp = client.requestManifest(ref)
             val body = resp.bodyAsText()
 
             val requestDescription = """

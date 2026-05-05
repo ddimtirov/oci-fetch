@@ -32,30 +32,30 @@ value class PlatformSelector(private val data: SelectorData = SelectorData()) {
     /**
      * Returns true if this selector matches the given platform JSON object.
      */
-    fun matches(platform: JsonObject?): Boolean {
-        if (platform == null) {
-            return architecture == null && os == null && osVersion == null && osFeatures.isEmpty() && variant == null
-        }
-
-        if (architecture != null && platform["architecture"]?.jsonPrimitive?.content != architecture) return false
-        if (os != null && platform["os"]?.jsonPrimitive?.content != os) return false
-        if (osVersion != null && platform["os.version"]?.jsonPrimitive?.content != osVersion) return false
-        if (variant != null && platform["variant"]?.jsonPrimitive?.content != variant) return false
-        
-        if (osFeatures.isNotEmpty()) {
+    fun matches(platform: JsonObject?): Boolean = when {
+        platform == null -> false
+        architecture != null && platform["architecture"] ?.jsonPrimitive?.content != architecture -> false
+        os           != null && platform["os"]           ?.jsonPrimitive?.content != os           -> false
+        osVersion    != null && platform["os.version"]   ?.jsonPrimitive?.content != osVersion    -> false
+        variant      != null && platform["variant"]      ?.jsonPrimitive?.content != variant      -> false
+        osFeatures.isNotEmpty() -> {
             val features = platform["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-            if (!features.containsAll(osFeatures)) return false
+            features.containsAll(osFeatures)
         }
-
-        return true
+        else -> true
     }
 
     /**
-     * Filters a list of manifests based on this selector.
-     * Expects a list of JSON objects each containing a "platform" field.
+     * Returns true if this selector matches the given platform.
      */
-    fun filterManifests(manifests: JsonArray): List<JsonObject> {
-        return manifests.mapNotNull { it.jsonObject }.filter { matches(it["platform"]?.jsonObject) }
+    fun matches(platform: Platform): Boolean = when {
+        !platform.isValid() -> false
+        architecture != null && platform.arch      != architecture -> false
+        os           != null && platform.osName    != os           -> false
+        osVersion    != null && platform.osVersion != osVersion    -> false
+        variant      != null && platform.variant   != variant      -> false
+        osFeatures.isNotEmpty() -> platform.osFeatures.containsAll(osFeatures)
+        else -> true
     }
 
     /**
@@ -65,3 +65,27 @@ value class PlatformSelector(private val data: SelectorData = SelectorData()) {
         return architecture != null || os != null || osVersion != null || osFeatures.isNotEmpty() || variant != null
     }
 }
+
+data class Platform(
+    val arch: String,
+    val osName: String,
+    val variant: String? = null,
+    val osVersion: String? = null,
+    val osFeatures: List<String> = emptyList()) {
+    fun isValid() = arch != "unknown" && osName != "unknown"
+
+    companion object {
+        fun fromJson(entry: JsonElement): Platform = entry.jsonObject["platform"]?.jsonObject?.let { platform ->
+            Platform(
+                arch = platform["architecture"]?.jsonPrimitive?.content ?: "",
+                variant = platform["variant"]?.jsonPrimitive?.content,
+                osName = platform["os"]?.jsonPrimitive?.content ?: "",
+                osVersion = platform["os.version"]?.jsonPrimitive?.content,
+                osFeatures = platform["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+            )
+        } ?: Platform("unknown", "unknown",)
+    }
+}
+
+class NoSuchPlatformSelectionException(m: String, val available: Collection<Platform>, val selector: PlatformSelector, cause: Throwable? = null) : Exception(m, cause)
+class AmbiguousPlatformSelectionException(m: String, val candidates: Collection<Platform>, val selector: PlatformSelector, cause: Throwable? = null) : Exception(m, cause)
