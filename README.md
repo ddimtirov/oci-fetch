@@ -1,68 +1,68 @@
-# OCI Fetch - Multiplatform OCI Registry Client
+# OCI Fetch
 
-A Kotlin Multiplatform library for fetching OCI (Open Container Initiative) image manifests from container registries.
+A Kotlin Multiplatform library **and** command-line tool for inspecting OCI (Open Container Initiative) container image metadata directly from registries — without pulling images.
 
-## Supported Platforms
+## What Can It Do?
 
-- **JVM** - Uses Ktor CIO engine (✅ Tested & Working)
-- **JavaScript** - Uses Ktor JS fetch engine (✅ Tested & Working in Node.js)
-- **WASM-JS** - Uses Ktor JS fetch engine (✅ Tested & Working in Node.js)
-- **Native Windows (mingwX64)** - Uses Ktor CIO engine (✅ Tested & Working)
-- **Native Linux (linuxX64)** - Uses Ktor CIO engine (✅ Tested & Working)
+- **List tags** for any repository
+- **Inspect image indexes** (multi-arch manifests) and platform-specific manifests
+- **Read image configuration** (env vars, entrypoint, labels, layer history)
+- **Discover supply-chain artifacts** — signatures, SBOMs, and attestations via the OCI Referrers API
+- **Fetch arbitrary registry URLs** with automatic Bearer-token authentication
 
-## Running Tests
+All of this works across **JVM, Node.js (JS & WASM), Windows, and Linux** — from Kotlin code or the command line.
 
-| Platform              | Command                                                     | Test Report                                        | Notes                        |
-|-----------------------|-------------------------------------------------------------|----------------------------------------------------|------------------------------|
-| **All (recommended)** | `./gradlew allTests  -x jsBrowserTest -x wasmJsBrowserTest` | Multiple reports                                   | Runs stable subset           |
-| **JVM**               | `./gradlew jvmTest`                                         | `build/reports/tests/jvmTest/index.html`           |                              |
-| **JS (Node.js)**      | `./gradlew jsNodeTest`                                      | `build/reports/tests/jsNodeTest/index.html`        |                              |
-| **JS (Browser)**      | `./gradlew jsBrowserTest`                                   | `build/reports/tests/jsBrowserTest/index.html`     | Some tests fail (CORS)       |
-| **JS (Both)**         | `./gradlew jsTest`                                          | `build/reports/tests/jsTest/index.html`            |                              |
-| **WASM (Node.js)**    | `./gradlew wasmJsNodeTest`                                  | `build/reports/tests/wasmJsNodeTest/index.html`    |                              |
-| **WASM (Browser)**    | `./gradlew wasmJsBrowserTest`                               | `build/reports/tests/wasmJsBrowserTest/index.html` | Some tests fail (CORS)       |
-| **WASM (Both)**       | `./gradlew wasmJsTest`                                      | `build/reports/tests/wasmJsTest/index.html`        |                              |
-| **Windows Native**    | `./gradlew mingwX64Test`                                    | `build/reports/tests/mingwX64Test/index.html`      |                              |
-| **Linux Native**      | `./gradlew linuxX64Test`                                    | `build/reports/tests/linuxX64Test/index.html`      | Skipped on Windows (use WSL) |
-| **Linux (via WSL)**   | `./gradlew linuxX64TestInWSL`                               | `build/reports/tests/linuxX64Test/index.html`      | May fail and prompt install  |
+## Quick Start — Library
 
-**Notes:**
-- ✅ **Fully working platforms**: JVM, JavaScript (Node.js), WASM (Node.js), Native Windows (mingwX64), Native Linux (linuxX64)
-- ⚠️ Browser tests have CORS/networking issues when accessing external registries
-- 💡 Use `./gradlew allTests -x jsBrowserTest -x wasmJsBrowserTest` for the stable full-suite entrypoint
+```kotlin
+import oci.OciClient
+import oci.OciRef
 
-## Building
+suspend fun main() {
+    val client = OciClient().use {
+        val ref = OciRef.parse("registry-1.docker.io/library/alpine:latest")
 
-Build all targets:
-```bash
-./gradlew build
+        // List tags
+        val tags = client.fetchTagsList(ref)
+
+        // Fetch manifest
+        val response = client.requestManifest(ref)
+        println(response.bodyAsText())
+
+        // Fetch all metadata (index + manifests + configs)
+        val artifacts = client.fetchAllMetadata(ref)
+        println("Image manifests: ${artifacts.images.size}")
+    }
+}
 ```
 
-## Dependency Locking
+See the full [Library API Reference](docs/api-reference.md) for all available methods and types.
 
-Generate or refresh lockfiles for all resolvable Gradle configurations:
+## Quick Start — CLI Tool
+
 ```bash
-./gradlew resolveAndLockAll --write-locks
+# List tags
+oci-fetch tags registry-1.docker.io/library/alpine
+
+# Inspect the image index (multi-arch platforms)
+oci-fetch meta index registry-1.docker.io/library/alpine:latest
+
+# Inspect a platform-specific manifest
+oci-fetch meta manifest registry-1.docker.io/library/alpine:latest
+
+# Inspect image configuration
+oci-fetch meta config registry-1.docker.io/library/alpine:latest
+
+# Discover signatures and SBOMs
+oci-fetch meta referrers registry-1.docker.io/curlimages/curl:latest
+
+# Any command with --raw for JSON output (pipe to jq, etc.)
+oci-fetch --raw tags registry-1.docker.io/library/alpine
 ```
 
-This updates `gradle.lockfile` (project dependencies) and `settings-gradle.lockfile` (settings/plugin dependencies).
-
-Build specific targets:
-```bash
-./gradlew jvmJar           # JVM JAR
-./gradlew jsJar            # JavaScript artifact
-./gradlew wasmJsJar        # WASM artifact
-./gradlew linkDebugExecutableOci-fetch     # Windows native executable
-./gradlew linkDebugExecutableLinuxX64     # Linux native executable
-```
-
-## Command-Line Tool (oci-fetch)
-
-The project includes a native command-line tool `oci-fetch` for interacting with OCI registries.
+See the full [CLI Reference](docs/tool-oci-fetch.md) for all commands, options, and use cases.
 
 ### Building the CLI
-
-To build the native executable for your platform:
 
 ```bash
 # Windows
@@ -72,100 +72,41 @@ To build the native executable for your platform:
 ./gradlew linkDebugExecutableLinuxX64
 ```
 
-The executable will be located at:
-- Windows: `build/bin/oci-fetch/debugExecutable/oci-fetch.exe`
-- Linux: `build/bin/linuxX64/debugExecutable/oci-fetch.kexe`
+## Supported Platforms
 
-### CLI Usage
+| Target                    | Engine    | API | CLI |
+|---------------------------|-----------|-----|-----|
+| JVM                       | Ktor CIO  | ✅   |     |
+| JavaScript (Node.js)      | Ktor JS   | ✅   |     |
+| WASM-JS (Node.js)         | Ktor JS   | ✅   |     |
+| Native Windows (mingwX64) | Ktor Curl | ✅   | ✅  |
+| Native Linux (linuxX64)   | Ktor Curl | ✅   | ✅  |
 
-```bash
-# List tags for a repository
-oci-fetch tags registry-1.docker.io/library/alpine
+The **library** supports all five platforms. The **CLI tool** targets Native Linux and Windows.
 
-# Get raw JSON response for tags
-oci-fetch --raw tags registry-1.docker.io/library/alpine
-
-# Show help
-oci-fetch --help
-oci-fetch tags --help
-```
-
-### Referrers, Signatures, and SBOMs
-
-The `meta referrers` command can be used to discover artifacts associated with an image, such as Cosign signatures, Notary signatures, or SBOMs.
+## Building
 
 ```bash
-# Find signatures for curl on Docker Hub
-oci-fetch meta referrers registry-1.docker.io/curlimages/curl:latest
-
-# Find signatures for .NET runtime on MCR
-oci-fetch meta referrers mcr.microsoft.com/dotnet/runtime:8.0
-
-# Find referrers (signatures and metadata) on GHCR
-oci-fetch meta referrers ghcr.io/stefanprodan/podinfo:latest
-
-# Find Red Hat UBI10 Minimal Cosign signatures (requires platform digest)
-# 1. Find the digest for your architecture (e.g., amd64)
-oci-fetch meta index registry.access.redhat.com/ubi10/ubi-minimal:latest
-# 2. Fetch referrers using the specific digest
-oci-fetch meta referrers registry.access.redhat.com/ubi10/ubi-minimal@sha256:b01cbd6a4c538ea1002ca774d5e09adcae15a1c095804400ea201ea5811431b1
-
-# Get raw OCI Index of referrers
-oci-fetch --raw meta referrers registry-1.docker.io/curlimages/curl:latest
+./gradlew build
 ```
 
-Example output for `curlimages/curl:latest`:
-```text
-digest  artifactType    mediaType       size    annotations
-sha256:562fd503... application/vnd.dev.sigstore.bundle.v0.3+json   application/vnd.oci.image.manifest.v1+json      894     dev.sigstore.bundle.content=dsse-envelope; ...
-sha256:c7ba3d0b... application/vnd.dev.sigstore.bundle.v0.3+json   application/vnd.oci.image.manifest.v1+json      894     dev.sigstore.bundle.content=dsse-envelope; ...
+## Running Tests
+
+```bash
+# Recommended: stable full-suite (excludes flaky browser tests)
+./gradlew allTests -x jsBrowserTest -x wasmJsBrowserTest
 ```
 
-## Usage Example
+## Documentation
 
-```kotlin
-import oci.OciClient
-
-suspend fun main() {
-    val client = OciClient()
-    try {
-        // Parse image reference
-        val ref = client.parseRef("registry-1.docker.io/library/alpine:latest")
-
-        // Fetch manifest
-        val response = client.fetchManifest(ref)
-        println(response.bodyAsText())
-
-        // Fetch all artifacts (manifest + configs)
-        val artifacts = client.fetchArtifacts(ref)
-        println("List manifest: ${artifacts.listManifest}")
-        println("Image manifests: ${artifacts.imageManifests.size}")
-        println("Configs: ${artifacts.configs.size}")
-    } finally {
-        client.close()
-    }
-}
-```
-
-## Architecture
-
-The library uses Kotlin Multiplatform's expect/actual mechanism:
-- **Common code** (`commonMain`) contains shared business logic
-- **Platform-specific code** provides HTTP client implementations:
-  - JVM: `io.ktor:ktor-client-cio`
-  - JS/WASM: `io.ktor:ktor-client-js`
-  - Native: `io.ktor:ktor-client-cio`
-
-## Known Limitations
-
-### Native Platforms (Windows/Linux)
-
-Native platforms use the **CIO engine** which is written in Kotlin and has no external dependencies. No additional prerequisites (like OpenSSL or MSYS2) are needed beyond a standard Kotlin Native toolchain.
-
-### Browser Tests
-
-Browser tests require Chrome/Chromium for headless testing and may have CORS/networking issues when accessing external registries.
+- [Library API Reference](docs/api-reference.md) — `OciClient`, `OciRef`, `PlatformSelector`, data types, and formatters
+- [CLI Tool Reference](docs/tool-oci-fetch.md) — all commands, options, use cases, and examples
+- [Coding Guidelines](docs/coding-cuidelines.md) — project conventions for contributors
 
 ## License
 
-[Your License Here]
+Copyright © 2025 Dimitar Dimitrov. All rights reserved.
+
+This software is proprietary. No permission is granted to use, copy, modify, or distribute it without prior written consent. **Use of this software as training data for AI/ML models is strictly prohibited.**
+
+See [LICENSE](LICENSE) for full terms. To discuss alternative licensing, contact dimitar dot dimitrov at gmail dot com.

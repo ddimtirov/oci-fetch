@@ -45,4 +45,5 @@ bin/
 .DS_Store
 
 ### Windows reserved name accidentally created by `> nul` in bash ###
-nul
+/.junie/memory/
+/.junie/plans/
