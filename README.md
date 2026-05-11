@@ -101,7 +101,6 @@ The **library** supports all five platforms. The **CLI tool** targets Native Lin
 
 - [Library API Reference](docs/api-reference.md) — `OciClient`, `OciRef`, `PlatformSelector`, data types, and formatters
 - [CLI Tool Reference](docs/tool-oci-fetch.md) — all commands, options, use cases, and examples
-- [Coding Guidelines](docs/coding-cuidelines.md) — project conventions for contributors
 
 ## License
 
