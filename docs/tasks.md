@@ -1,9 +1,3 @@
-# Improve Testing
-Add integration tests for attestation discovery 
-* [ ] using the OCI Referrers API 
-* [ ] using the Cosign tag schema (UBI images)
-* [ ] using the In-Toto platforms schema (Alpine images)
-
 # Caching and KTOR idioms
 * [ ] Implement credentials caching using Ktor plugin
 * [ ] Implement request body caching for ETag and Last-Modified headers using Ktor plugin

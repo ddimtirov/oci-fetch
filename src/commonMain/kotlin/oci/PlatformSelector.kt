@@ -75,15 +75,15 @@ data class Platform(
     fun isValid() = arch != "unknown" && osName != "unknown"
 
     companion object {
-        fun fromJson(entry: JsonElement): Platform = entry.jsonObject["platform"]?.jsonObject?.let { platform ->
+        fun fromJson(entry: JsonElement): Platform = entry.jsonObject.let { platform ->
             Platform(
-                arch = platform["architecture"]?.jsonPrimitive?.content ?: "",
+                arch = platform["architecture"]?.jsonPrimitive?.content ?: "unknown",
                 variant = platform["variant"]?.jsonPrimitive?.content,
-                osName = platform["os"]?.jsonPrimitive?.content ?: "",
+                osName = platform["os"]?.jsonPrimitive?.content ?: "unknown",
                 osVersion = platform["os.version"]?.jsonPrimitive?.content,
                 osFeatures = platform["os.features"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
             )
-        } ?: Platform("unknown", "unknown",)
+        }
     }
 }
 

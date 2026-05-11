@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class OciAuthAndFetchTest {
+class OciAuthAndFetchIT {
 
     private fun imageTest(spec: String) = runTest {
         OciClient().use { client ->

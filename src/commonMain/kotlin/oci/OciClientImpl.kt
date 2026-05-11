@@ -98,13 +98,12 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         check(response.status == HttpStatusCode.OK) { "Failed to fetch tags: ${response.status}" }
 
         val body = response.bodyAsText()
-        val json = Json.parseToJsonElement(body).jsonObject
+        val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
         return json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
     }
 
     override suspend fun requestManifest(image: OciRef): HttpResponse =
-        if (image.isDigest) requestBlob(image.registry, image.repository, image.reference)
-        else requestUrl("https://${image.registry}/v2/${image.repository}/manifests/${image.reference}", acceptManifest)
+        requestUrl("https://${image.registry}/v2/${image.repository}/manifests/${image.reference}", acceptManifest)
 
     override suspend fun requestManifest(registry: String, repository: String, tag: String): HttpResponse =
         requestUrl("https://$registry/v2/$repository/manifests/$tag", acceptManifest)
@@ -115,7 +114,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         val contentType = topResp.headers[HttpHeaders.ContentType] ?: ""
 
         // Determine if top-level is an index (manifest list) or a single image manifest
-        val topJson = Json.parseToJsonElement(topBody).jsonObject
+        val topJson = Json.parseToJsonElement(topBody).jsonObject.rethrowErrors()
         val indexContent = isOciImageIndex(topJson, contentType)
 
         return if (indexContent) {
@@ -132,7 +131,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
                     val configJson = if (configDigest != null) {
                         val configResponse = requestBlob(manifestRef.withDigest(configDigest))
                         check(configResponse.status == HttpStatusCode.OK) { "Failed to fetch config blob: ${configResponse.status}" }
-                        Json.parseToJsonElement(configResponse.bodyAsText()).jsonObject
+                        Json.parseToJsonElement(configResponse.bodyAsText()).jsonObject.rethrowErrors()
                     } else {
                         null
                     }
@@ -146,7 +145,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
             val config = configDigest?.let { digest ->
                 val configResponse = requestBlob(image.registry, image.repository, digest)
                 check(configResponse.status == HttpStatusCode.OK) { "Failed to fetch config blob: ${configResponse.status}" }
-                Json.parseToJsonElement(configResponse.bodyAsText()).jsonObject
+                Json.parseToJsonElement(configResponse.bodyAsText()).jsonObject.rethrowErrors()
             }
             ImageIndexArtifacts(image, index = null, listOf(ImageArtifacts(image, topJson, config)))
         }
@@ -173,7 +172,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
             val body = resp.bodyAsText()
             val json = try {
-                Json.parseToJsonElement(body).jsonObject
+                Json.parseToJsonElement(body).jsonObject.rethrowErrors()
             } catch (_: SerializationException) {
                 return@flatMap emptyList()
             }
@@ -218,7 +217,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
         val body = response.bodyAsText()
         val contentType = response.headers[HttpHeaders.ContentType] ?: ""
-        val json = Json.parseToJsonElement(body).jsonObject
+        val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
 
         return when {
             isOciImageManifest(json) -> validateResolvedManifest(image, selector)
@@ -270,6 +269,12 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
     override fun isOciImageManifest(json: JsonObject?): Boolean =
         listOf("layer", "config", "subject", "fsLayers").any { json?.containsKey(it) ?: false }
+
+    private fun JsonObject.rethrowErrors(): JsonObject {
+        val errors = jsonObject["errors"]?.jsonArray ?: emptyList()
+        check(errors.isEmpty()) { "Index has errors: $errors" }
+        return this
+    }
 
     private suspend fun validateResolvedManifest(image: OciRef, selector: PlatformSelector): OciRef {
         if (!selector.hasConstraints()) return image // shortcut expensive validation
@@ -327,7 +332,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
                     require(response.status == HttpStatusCode.OK)
                     val contentType = response.headers[HttpHeaders.ContentType] ?: ""
                     val body = response.bodyAsText()
-                    val json = Json.parseToJsonElement(body).jsonObject
+                    val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
                     when {
                         // It's an index (OCI Referrers Tag Schema), add its manifests
                         isOciImageIndex(json, contentType) -> json["manifests"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
@@ -421,7 +426,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
         // However, some registries (like Quay) might support Referrers API but return empty,
         // while still having Cosign tags.
-        val json = Json.parseToJsonElement(text).jsonObject
+        val json = Json.parseToJsonElement(text).jsonObject.rethrowErrors()
         return if (!json["manifests"]?.jsonArray.isNullOrEmpty()) json else null
         // If empty, fall through to tag-schema and Cosign discovery
     }

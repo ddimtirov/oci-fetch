@@ -31,7 +31,7 @@ class ReferrersTest {
     @Test
     fun apiReturnsBody_whenServerFiltered() = runTest {
         val responseJson = """{"schemaVersion":2,"manifests":[{"digest":"sha256:s","artifactType":"application/sig"}]}"""
-        OciClient(mockClient { req ->
+    OciClient(mockClient { req ->
             assertTrue(req.url.encodedPath.endsWith("/v2/library/alpine/referrers/$subjectDigest"))
             assertEquals("application/sig", req.url.parameters["artifactType"])
             respond(
