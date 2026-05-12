@@ -7,6 +7,7 @@ import io.ktor.client.engine.js.Js
  * Creates a JS-specific HttpClient engine.
  */
 internal actual fun createHttpClient(): HttpClient = HttpClient(Js) {
+    installHttpCache()
     installOciBearerTokenAuth()
 }
 

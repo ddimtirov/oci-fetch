@@ -4,6 +4,7 @@ import io.ktor.client.HttpClientConfig
 import io.ktor.client.plugins.auth.Auth
 import io.ktor.client.plugins.auth.providers.BearerTokens
 import io.ktor.client.plugins.auth.providers.bearer
+import io.ktor.client.plugins.cache.HttpCache
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
@@ -11,6 +12,10 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+
+internal fun HttpClientConfig<*>.installHttpCache() {
+    install(HttpCache)
+}
 
 internal fun HttpClientConfig<*>.installOciBearerTokenAuth(
     credentialsStore: CredentialsStore = CredentialsStore.default,

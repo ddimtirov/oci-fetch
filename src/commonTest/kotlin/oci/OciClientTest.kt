@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.fullPath
@@ -329,6 +330,97 @@ class OciClientTest {
     }
 
     @Test
+    fun httpCacheSendsIfNoneMatchOnSubsequentRequests() = runTest {
+        var requestCount = 0
+        val client = OciClient(mockClientWithCache { req ->
+            requestCount++
+            when {
+                req.url.encodedPath.endsWith("/v2/library/alpine/manifests/latest") -> {
+                    val ifNoneMatch = req.headers[HttpHeaders.IfNoneMatch]
+                    if (ifNoneMatch == "\"etag-123\"") {
+                        respond(
+                            content = "",
+                            status = HttpStatusCode.NotModified,
+                            headers = headersOf(
+                                HttpHeaders.ETag to listOf("\"etag-123\""),
+                                HttpHeaders.CacheControl to listOf("must-revalidate"),
+                            ),
+                        )
+                    } else {
+                        respond(
+                            content = "{\"schemaVersion\":2,\"config\":{}}",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(
+                                HttpHeaders.ContentType to listOf("application/vnd.oci.image.manifest.v1+json"),
+                                HttpHeaders.ETag to listOf("\"etag-123\""),
+                                HttpHeaders.CacheControl to listOf("must-revalidate"),
+                            ),
+                        )
+                    }
+                }
+                else -> error("Unexpected request: ${req.url}")
+            }
+        })
+
+        client.use {
+            val first = it.requestManifest("registry.example.com", "library/alpine", "latest")
+            assertEquals(HttpStatusCode.OK, first.status)
+
+            val second = it.requestManifest("registry.example.com", "library/alpine", "latest")
+            assertEquals(HttpStatusCode.OK, second.status)
+            assertEquals("{\"schemaVersion\":2,\"config\":{}}", second.bodyAsText())
+        }
+
+        assertEquals(2, requestCount)
+    }
+
+    @Test
+    fun httpCacheSendsIfModifiedSinceOnSubsequentRequests() = runTest {
+        var requestCount = 0
+        val lastModified = "Wed, 13 May 2026 00:00:00 GMT"
+        val client = OciClient(mockClientWithCache { req ->
+            requestCount++
+            when {
+                req.url.encodedPath.endsWith("/v2/library/alpine/manifests/latest") -> {
+                    val ifModifiedSince = req.headers[HttpHeaders.IfModifiedSince]
+                    if (ifModifiedSince != null) {
+                        respond(
+                            content = "",
+                            status = HttpStatusCode.NotModified,
+                            headers = headersOf(
+                                HttpHeaders.LastModified to listOf(lastModified),
+                                HttpHeaders.CacheControl to listOf("must-revalidate"),
+                            ),
+                        )
+                    } else {
+                        respond(
+                            content = "{\"schemaVersion\":2,\"config\":{}}",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(
+                                HttpHeaders.ContentType to listOf("application/vnd.oci.image.manifest.v1+json"),
+                                HttpHeaders.LastModified to listOf(lastModified),
+                                HttpHeaders.CacheControl to listOf("must-revalidate"),
+                            ),
+                        )
+                    }
+                }
+                else -> error("Unexpected request: ${req.url}")
+            }
+        })
+
+        client.use {
+            val first = it.requestManifest("registry.example.com", "library/alpine", "latest")
+            assertEquals(HttpStatusCode.OK, first.status)
+
+            val second = it.requestManifest("registry.example.com", "library/alpine", "latest")
+            assertEquals(HttpStatusCode.OK, second.status)
+            assertEquals("{\"schemaVersion\":2,\"config\":{}}", second.bodyAsText())
+        }
+
+        assertEquals(2, requestCount)
+    }
+
+    @Test
     fun scrapeUsesSha256FallbackWhenDigestHeaderMissing() = runTest {
         val tagsListJson = """{"name":"library/alpine","tags":["only.sig"]}"""
         val manifest = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","subject":{"digest":"$SUBJECT_DIGEST"},"config":{"digest":"sha256:c"},"layers":[]}"""
@@ -361,5 +453,10 @@ class OciClientTest {
     private fun mockClientWithBearerAuth(handler: MockRequestHandler): HttpClient = HttpClient(MockEngine(handler)) {
         installOciBearerTokenAuth()
     }
+
+    private fun mockClientWithCache(handler: MockRequestHandler): HttpClient = HttpClient(MockEngine(handler)) {
+        installHttpCache()
+    }
+
     private fun json(string: String): JsonObject = Json.parseToJsonElement(string).jsonObject
 }

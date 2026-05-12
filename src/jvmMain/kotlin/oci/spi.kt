@@ -7,6 +7,7 @@ import io.ktor.client.engine.cio.CIO
  * Creates a JVM-specific HttpClient engine using CIO.
  */
 internal actual fun createHttpClient(): HttpClient = HttpClient(CIO) {
+    installHttpCache()
     installOciBearerTokenAuth()
 }
 
