@@ -262,8 +262,8 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
     }
 
     override fun isOciImageIndex(json: JsonObject?, contentType: String): Boolean = when {
-        contentType.contains("application/vnd.oci.image.index.v1+json", true) -> true
-        contentType.contains("application/vnd.docker.distribution.manifest.list.v2+json", true) -> true
+        contentType.contains("application/vnd.oci.image.index.v1+json", true) -> json!=null
+        contentType.contains("application/vnd.docker.distribution.manifest.list.v2+json", true) -> json!=null
         else -> json != null && json["manifests"] is JsonArray
     }
 
