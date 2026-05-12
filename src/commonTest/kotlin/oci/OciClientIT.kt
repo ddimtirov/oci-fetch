@@ -26,7 +26,7 @@ private val SELECT_AMD64 = PlatformSelector(architecture = "amd64")
 
 class OciClientIT {
     @Test
-    fun testUbiTagListIsLarge() = runTest {
+    fun ubiTagListIsLarge() = runTest {
         if (isBrowser() || isNative()) return@runTest
         OciClient().use { client ->
             val tags = client.fetchTagsList(OciRef.parse("registry.access.redhat.com/ubi9/ubi"))
@@ -36,7 +36,7 @@ class OciClientIT {
     }
 
     @Test
-    fun testFetchManifest_alpine() = runTest {
+    fun fetchManifest_alpine() = runTest {
         if (isBrowser() || isNative()) return@runTest
         OciClient().use { client ->
             val ref = OciRef.parse("registry-1.docker.io/library/alpine:latest")
@@ -98,7 +98,7 @@ class OciClientIT {
 
 
     @Test
-    fun testReferrersOciApi() = runTest {
+    fun referrersOciApi() = runTest {
         if (isBrowser() || isNative()) return@runTest
         OciClient().use { client ->
             // ghcr.io supports the OCI Referrers API.

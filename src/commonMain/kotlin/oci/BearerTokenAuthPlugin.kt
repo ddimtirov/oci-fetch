@@ -12,7 +12,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-internal fun HttpClientConfig<*>.installOciBearerTokenAuth() {
+internal fun HttpClientConfig<*>.installOciBearerTokenAuth(
+    credentialsStore: CredentialsStore = CredentialsStore.default,
+) {
     install(Auth) {
         bearer {
             loadTokens { null }
@@ -20,18 +22,21 @@ internal fun HttpClientConfig<*>.installOciBearerTokenAuth() {
                 val wwwAuthenticateHeader = response.headers[HttpHeaders.WWWAuthenticate]
                 checkNotNull(wwwAuthenticateHeader) { "WWW-Authenticate header is missing" }
 
-                val tokenResponse = client.get(bearerTokenUrl(wwwAuthenticateHeader)) {
-                    markAsRefreshTokenRequest()
-                }
-                check(tokenResponse.status == HttpStatusCode.OK) {
-                    "Failed to fetch token: ${tokenResponse.status}"
-                }
+                val tokenUrl = bearerTokenUrl(wwwAuthenticateHeader)
+                val token = credentialsStore.get(tokenUrl) { url ->
+                    val tokenResponse = client.get(url) {
+                        markAsRefreshTokenRequest()
+                    }
+                    check(tokenResponse.status == HttpStatusCode.OK) {
+                        "Failed to fetch token: ${tokenResponse.status}"
+                    }
 
-                val json = Json.parseToJsonElement(tokenResponse.bodyAsText()).jsonObject
-                val token = (json["token"] ?: json["access_token"])
-                    ?.jsonPrimitive
-                    ?.content
-                checkNotNull(token) { "Token is missing in response $tokenResponse" }
+                    val json = Json.parseToJsonElement(tokenResponse.bodyAsText()).jsonObject
+                    val t = (json["token"] ?: json["access_token"])
+                        ?.jsonPrimitive
+                        ?.content
+                    checkNotNull(t) { "Token is missing in response $tokenResponse" }
+                }
                 BearerTokens(accessToken = token, refreshToken = token)
             }
         }
