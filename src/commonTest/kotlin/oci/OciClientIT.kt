@@ -117,7 +117,7 @@ class OciClientIT {
     }
 
     @Test
-    fun testCosignTagSchema(): TestResult {
+    fun cosignTagSchema(): TestResult {
         return runTest {
             if (isBrowser() || isNative()) return@runTest
             OciClient().use { client ->
@@ -144,7 +144,7 @@ class OciClientIT {
     }
 
     @Test
-    fun testCosignTagSchemaScraping(): TestResult {
+    fun cosignTagSchemaScraping(): TestResult {
         return runTest {
             if (isBrowser() || isNative()) return@runTest
             OciClient().use { client ->
@@ -153,7 +153,7 @@ class OciClientIT {
                 val resolved = client.resolveToImageManifest(image, SELECT_AMD64)
 
                 val digestTag = Regex.escape(resolved.reference.replace(":", "-"))
-                val regex = "^$digestTag(?:\\.(?:sig|att|sbom))?$"
+                val regex = Regex("^$digestTag(?:\\.(?:sig|att|sbom))?$")
 
                 val referrersIndex = client.scrapeReferrers(resolved, regex)
 

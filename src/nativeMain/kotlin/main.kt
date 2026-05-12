@@ -125,8 +125,8 @@ class ReferrersCommand(
 ) : CliktCommand(name = "referrers") {
     override fun help(context: Context): String = "Fetch referrers for an image"
 
-    val type by option("--type", help = "Filter referrers by artifact type")
-    val scrape by option("--scrape", help = "Force scrape mode: regex used to discover referrers by scraping tags")
+    val type by option("--type", help = "Filter referrers by artifact type (exact match against artifactType)")
+    val scrape by option("--scrape", help = "Force scrape mode: discover referrers by scraping tags (partial regex match against tag name)")
     val ref by argument(help = "The OCI image reference (e.g., registry-1.docker.io/library/alpine:latest)")
 
     @OptIn(ExperimentalForeignApi::class)
@@ -152,7 +152,7 @@ class ReferrersCommand(
 
                 val scrapedTagsRegex = scrape
                 val referrers = if (scrapedTagsRegex != null) {
-                    client.scrapeReferrers(digestRef, scrapedTagsRegex, type)
+                    client.scrapeReferrers(digestRef, Regex(scrapedTagsRegex), type?.let { Regex("^$it$") })
                 } else {
                     client.fetchReferrers(digestRef, type)
                 }

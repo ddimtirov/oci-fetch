@@ -9,7 +9,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.isSuccess
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -39,6 +38,8 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
             "application/vnd.docker.container.image.v1+json",
             "application/octet-stream",
         ).joinToString(",")
+
+        private val nextRelRegex = Regex("""\brel\s*=\s*"?next"?""", RegexOption.IGNORE_CASE)
     }
 
     override suspend fun requestUrl(url: String, acceptHeader: String?): HttpResponse {
@@ -88,18 +89,54 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         requestTags(image.registry, image.repository)
 
     override suspend fun fetchTagsList(image: OciRef): List<String> =
-        parseTagsResponse(requestTags(image))
+        fetchTagsList(image.registry, image.repository)
 
-    override suspend fun fetchTagsList(registry: String, repository: String): List<String> =
-        parseTagsResponse(requestTags(registry, repository))
+    override suspend fun fetchTagsList(registry: String, repository: String): List<String> {
+        val initialUrl = "https://$registry/v2/$repository/tags/list"
+        val tags = mutableListOf<String>()
+        val visitedPages = mutableSetOf<String>()
+        var nextPageUrl: String? = initialUrl
+
+        while (nextPageUrl != null) {
+            check(visitedPages.add(nextPageUrl)) {
+                "Detected tags pagination loop at $nextPageUrl"
+            }
+            val response = requestUrl(nextPageUrl)
+            tags += run {
+                check(response.status == HttpStatusCode.OK) { "Failed to fetch tags: ${response.status}" }
+                val body = response.bodyAsText()
+                val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
+                json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+            }
+            nextPageUrl = nextPageUrl(response)?.let {
+                when {
+                    it.startsWith("https://") || it.startsWith("http://") -> it
+                    it.startsWith("/") -> "https://$registry$it"
+                    it.startsWith("v2/") -> "https://$registry/$it"
+                    it.startsWith("?") -> "https://$registry/v2/$repository/tags/list$it"
+                    else -> error("Unsupported pagination URL in tags Link header: $it")
+                }
+            }
+        }
+        return tags.distinct()
+    }
 
 
-    private suspend fun parseTagsResponse(response: HttpResponse): List<String> {
-        check(response.status == HttpStatusCode.OK) { "Failed to fetch tags: ${response.status}" }
+    private fun nextPageUrl(response: HttpResponse): String? {
+        val linkHeaders = response.headers.getAll(HttpHeaders.Link) ?: return null
 
-        val body = response.bodyAsText()
-        val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
-        return json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+        val linkHeader = linkHeaders
+            .flatMap { it.split(',') }
+            .map { it.trim() }
+            .firstOrNull { nextRelRegex.containsMatchIn(it) }
+            ?: return null
+
+        val rawUrl = linkHeader.substringBefore(';').trim()
+        check(rawUrl.startsWith("<") && rawUrl.endsWith(">")) {
+            "Malformed tags pagination Link header: $linkHeader"
+        }
+
+        return rawUrl.removePrefix("<").removeSuffix(">")
     }
 
     override suspend fun requestManifest(image: OciRef): HttpResponse =
@@ -157,58 +194,15 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
     override suspend fun scrapeReferrers(
         subject: OciRef,
-        regex: String,
-        artifactType: String?,
+        tags: Regex,
+        artifactTypeFilter: Regex?,
     ): JsonObject {
         check(subject.isDigest) { "Scraping requires a digest-based reference" }
-        val pattern = Regex(regex)
 
-        val tags = fetchTagsList(subject)
-        val matchingTags = tags.filter { pattern.containsMatchIn(it) }
-        val referrers = matchingTags.flatMap { tag ->
-            val ref = subject.withTag(tag)
-            val resp = requestManifest(ref)
-            if (resp.status != HttpStatusCode.OK) return@flatMap emptyList()
-
-            val body = resp.bodyAsText()
-            val json = try {
-                Json.parseToJsonElement(body).jsonObject.rethrowErrors()
-            } catch (_: SerializationException) {
-                return@flatMap emptyList()
-            }
-
-            val subjectDigest = json["subject"]?.jsonObject?.get("digest")?.jsonPrimitive?.content
-            if (subjectDigest != subject.reference) return@flatMap emptyList()
-
-            val foundArtifactType = json["artifactType"]?.jsonPrimitive?.content != artifactType
-            if (artifactType != null && foundArtifactType) return@flatMap emptyList()
-
-            val bodyBytes = body.encodeToByteArray()
-            val bodyDigest = SHA256().digest(bodyBytes).toHexString()
-            val foundDigest = resp.headers["Docker-Content-Digest"] ?: "sha256:$bodyDigest"
-            val size = resp.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: bodyBytes.size
-            val mediaType = json["mediaType"]?.jsonPrimitive?.contentOrNull
-                ?: resp.headers[HttpHeaders.ContentType]?.substringBefore(';')?.trim()
-                ?: ""
-            val descriptor = mutableMapOf<String, JsonElement>(
-                "digest" to JsonPrimitive(foundDigest),
-                "mediaType" to JsonPrimitive(mediaType),
-                "size" to JsonPrimitive(size),
-            )
-            json["artifactType"]?.let { descriptor["artifactType"] = it }
-            json["annotations"]?.let { descriptor["annotations"] = it }
-
-            return@flatMap listOf(JsonObject(descriptor))
-        }
-
-        // Constructs and serializes OCI image index with referrers
-        return JsonObject(
-            mapOf(
-                "schemaVersion" to JsonPrimitive(2),
-                "mediaType" to JsonPrimitive("application/vnd.oci.image.index.v1+json"),
-                "manifests" to JsonArray(referrers),
-            )
-        )
+        val fetchedTags = fetchTagsList(subject)
+        val matchingTags = fetchedTags.filter { tags.containsMatchIn(it) }
+        val matchingRefs = matchingTags.map { subject.withTag(it) }
+        return referrersFromManifests(matchingRefs, artifactTypeFilter)
     }
 
     override suspend fun resolveToImageManifest(image: OciRef, selector: PlatformSelector): OciRef {
@@ -318,38 +312,47 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
     private suspend fun referrersCosignConvention(ref: OciRef, artifactType: String?): JsonObject {
         check(ref.isDigest) { "Referrers API requires a digest-based reference" }
-        val digest = ref.reference.replace(":", "-")
-        val cosignTags = listOf("", ".sig", ".att", ".sbom").map { digest + it }
-        val discoveredManifests = cosignTags
-            .flatMap { tag ->
-                val response = requestManifest(ref.withTag(tag))
-                if (response.status != HttpStatusCode.OK) {
-                    require(response.status == HttpStatusCode.NotFound) {
-                        "Referrers tag-schema fallback returned unexpected ${response.status} for $tag"
-                    }
-                    emptyList()
-                } else {
-                    require(response.status == HttpStatusCode.OK)
-                    val contentType = response.headers[HttpHeaders.ContentType] ?: ""
-                    val body = response.bodyAsText()
-                    val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
-                    when {
-                        // It's an index (OCI Referrers Tag Schema), add its manifests
-                        isOciImageIndex(json, contentType) -> json["manifests"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+        val artifactTypeFilter = artifactType?.let { Regex("^$it$") }
+        val cosignTagPrefix = ref.reference.replace(":", "-")
+        val cosignRefs = listOf("", ".sig", ".att", ".sbom")
+            .map { suffix -> cosignTagPrefix + suffix }
+            .map { tag -> ref.withTag(tag) }
+        return referrersFromManifests(cosignRefs, artifactTypeFilter)
+    }
 
-                        // It's a single manifest (Cosign style), convert to descriptor and add
-                        isOciImageManifest(json) -> listOf(JsonObject(surrogateManifestCosign(body, response, json, tag)))
+    private suspend fun referrersFromManifests(refs: List<OciRef>, artifactTypeFilter: Regex?): JsonObject {
+        val discoveredManifests = refs.flatMap { ref ->
+            val response = requestManifest(ref)
+            if (response.status != HttpStatusCode.OK) {
+                require(response.status == HttpStatusCode.NotFound) {
+                    "Referrers tag-schema fallback returned unexpected ${response.status} for $ref"
+                }
+                emptyList()
+            } else {
+                require(response.status == HttpStatusCode.OK)
+                val contentType = response.headers[HttpHeaders.ContentType] ?: ""
+                val body = response.bodyAsText()
+                val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
+                when {
+                    // It's an index (OCI Referrers Tag Schema), add its manifests
+                    isOciImageIndex(json, contentType) ->
+                        json["manifests"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
 
-                        else -> emptyList()
-                    }
+                    // It's a single manifest (Cosign style), convert to descriptor and add
+                    isOciImageManifest(json) ->
+                        listOf(JsonObject(surrogateManifestCosign(body, response, json, ref.reference)))
+
+                    else -> emptyList()
                 }
             }
+        }
 
-        val filteredManifests = if (artifactType == null) {
+        val filteredManifests = if (artifactTypeFilter == null) {
             discoveredManifests
         } else {
             discoveredManifests.filter {
-                it["artifactType"]?.jsonPrimitive?.content == artifactType
+                val artifactType = it["artifactType"]?.jsonPrimitive?.content
+                artifactType != null && artifactTypeFilter.containsMatchIn(artifactType)
             }
         }
 
@@ -357,7 +360,6 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         resultIndex["schemaVersion"] = JsonPrimitive(2)
         resultIndex["mediaType"] = JsonPrimitive("application/vnd.oci.image.index.v1+json")
         resultIndex["manifests"] = JsonArray(filteredManifests.map { JsonObject(it) })
-
         return JsonObject(resultIndex)
     }
 

@@ -9,7 +9,12 @@ import kotlinx.serialization.json.JsonObject
  * Provides methods for performing common OCI image and manifest operations such as
  * fetching blobs, tags, manifests, and resolving image references.
  *
- * Inherits from AutoCloseable, so it can be closed to release any associated resources.
+ * There is a quirk that [scrapeReferrers] and [fetchReferrers] have similar functionality
+ * and API, but different filtering mechanisms. [scrapeReferrers] uses a regex for
+ * `artifactTypeFilter` to allow more efficient processing, while [fetchReferrers] uses
+ * a literal string for `artifactType` to match the OCI referrer API.
+ *
+ * Inherits from [AutoCloseable], so it can be closed to release any associated resources.
  */
 interface OciClient : AutoCloseable {
     /**
@@ -74,13 +79,13 @@ interface OciClient : AutoCloseable {
     /**
      * Returns the manifests pointing to a target digest by retrieving and checking
      * the manifests of all tags matching a regex, whether they point to the subject.
-     *
+     * 
      * @param subject The subject as a digest-based `ImageRef` object.
-     * @param regex identifying which tags to scrape.
-     * @param artifactType The optional artifact type to filter referrers by.
+     * @param tags selecting which tags to scrape, matching partial tag names.
+     * @param artifactTypeFilter The optional artifact type to filter referrers by, matching partial type name.
      * @return A JSON representing the referrers, constructed as an OCI image index.
      */
-    suspend fun scrapeReferrers(subject: OciRef, regex: String, artifactType: String?=null): JsonObject
+    suspend fun scrapeReferrers(subject: OciRef, tags: Regex, artifactTypeFilter: Regex? = null): JsonObject
 
     /**
      * Resolves a reference to a specific image manifest based on platform constraints.
@@ -108,7 +113,7 @@ interface OciClient : AutoCloseable {
          *                   If provided, the caller is responsible for managing its lifecycle
          *                   (i.e. the provided client will not be closed by OciClient.close()).
          */
-        operator fun invoke(httpClient: HttpClient? = null): OciClient = OciClientImpl(httpClient ?: createHttpClient(), httpClient==null)
+        operator fun invoke(httpClient: HttpClient? = null): OciClient = OciClientImpl(httpClient ?: createHttpClient(), httpClient!=null)
     }
 }
 

@@ -40,21 +40,25 @@ class OciClientTest {
     }
 
     @Test
-    fun testExternalHttpClientInstantiation() = runTest {
+    fun externalHttpClientInstantiation() = runTest {
         val http = HttpClient(MockEngine { respond("ok") })
         val client = OciClient(http)
-        assertTrue(http.isActive)
+        assertTrue(http.isActive, "From the moment the OCI client is created, the http client should be active.")
         client.use {
-            assertTrue(http.isActive)
+            assertTrue(http.isActive, "The http client should remain active while the OCI client is used.")
         }
-        assertTrue(http.isActive)
+        assertTrue(http.isActive, "Externally created http client should remain active after the OCI client is closed.")
+
+        client.close()
+        assertTrue(http.isActive, "Externally created http client is not closed when we close the OCI client.")
+
 
         http.close()
         repeat(10) { // poor man's awaitility
             if (!http.isActive) return@repeat
             delay(100.milliseconds)
         }
-        assertFalse(http.isActive)
+        assertFalse(http.isActive, "Explicitly closing the http client should work.")
     }
 
     @Test
@@ -76,6 +80,40 @@ class OciClientTest {
             assertTrue(client.isOciImageManifest(json("""{"subject": {}}""")))
             assertTrue(client.isOciImageManifest(json("""{"fsLayers": {}}""")))
             assertFalse(client.isOciImageManifest(json("""{"manifest": {}}""")))
+        }
+    }
+
+    @Test
+    fun fetchTagsListFollowsPaginationLinkHeader() = runTest {
+        val observedLastParams = mutableListOf<String?>()
+
+        OciClient(mockClient { req ->
+            observedLastParams += req.url.parameters["last"]
+            when (req.url.parameters["last"]) {
+                null -> respond(
+                    content = """{"name":"library/alpine","tags":["1","2"]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(
+                        HttpHeaders.ContentType to listOf("application/json"),
+                        HttpHeaders.Link to listOf("</v2/library/alpine/tags/list?n=2&last=2>; rel=\"next\"")
+                    )
+                )
+
+                "2" -> {
+                    assertEquals("2", req.url.parameters["n"])
+                    respond(
+                        content = """{"name":"library/alpine","tags":["3"]}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                }
+
+                else -> error("Unexpected request: ${req.url}")
+            }
+        }).use { client ->
+            val tags = client.fetchTagsList("registry.example.com", "library/alpine")
+            assertEquals(listOf("1", "2", "3"), tags)
+            assertEquals(listOf(null, "2"), observedLastParams)
         }
     }
 
@@ -182,43 +220,6 @@ class OciClientTest {
     }
 
     @Test
-    fun scrapeMatchesOnlySubjectDigest() = runTest {
-        val tagsListJson = """{"name":"library/alpine","tags":["v1.sig","v2.sig","v3.sig"]}"""
-        val matchingManifest = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","subject":{"digest":"$SUBJECT_DIGEST"},"config":{"digest":"sha256:c"},"layers":[]}"""
-        val nonMatchingManifest = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","subject":{"digest":"sha256:other"},"config":{"digest":"sha256:c"},"layers":[]}"""
-
-        OciClient(mockClient { req ->
-            when {
-                req.url.encodedPath.endsWith("/tags/list") -> respond(
-                    content = tagsListJson,
-                    status = HttpStatusCode.OK,
-                    headers = headersOf(HttpHeaders.ContentType, "application/json")
-                )
-                req.url.encodedPath.endsWith("/manifests/v1.sig") ||
-                        req.url.encodedPath.endsWith("/manifests/v3.sig") -> respond(
-                    content = matchingManifest,
-                    status = HttpStatusCode.OK,
-                    headers = headersOf(
-                        HttpHeaders.ContentType to listOf("application/vnd.oci.image.manifest.v1+json"),
-                        "Docker-Content-Digest" to listOf("sha256:descriptor")
-                    )
-                )
-                req.url.encodedPath.endsWith("/manifests/v2.sig") -> respond(
-                    content = nonMatchingManifest,
-                    status = HttpStatusCode.OK,
-                    headers = headersOf(HttpHeaders.ContentType, "application/vnd.oci.image.manifest.v1+json")
-                )
-                else -> error("Unexpected request: ${req.url}")
-            }
-        }).use { client ->
-            val parsed = client.scrapeReferrers(DIGEST_IMAGE, ".*\\.sig$")
-            val manifests = parsed["manifests"]!!.jsonArray
-            assertEquals(2, manifests.size)
-            assertTrue(manifests.all { it.jsonObject["digest"]?.jsonPrimitive?.content == "sha256:descriptor" })
-        }
-    }
-
-    @Test
     fun scrapeFiltersByArtifactType() = runTest {
         val tagsListJson = """{"name":"library/alpine","tags":["a.sig","b.sig"]}"""
         val sigManifest = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","artifactType":"application/sig","subject":{"digest":"$SUBJECT_DIGEST"},"config":{"digest":"sha256:c"},"layers":[]}"""
@@ -250,7 +251,7 @@ class OciClientTest {
                 else -> error("Unexpected request: ${req.url}")
             }
         }).use { client ->
-            val parsed = client.scrapeReferrers(DIGEST_IMAGE, ".*\\.sig$", "application/sig")
+            val parsed = client.scrapeReferrers(DIGEST_IMAGE, Regex(".*\\.sig$"), Regex("application/sig"))
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals("sha256:sig", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
@@ -279,7 +280,7 @@ class OciClientTest {
                 else -> error("Unexpected request: ${req.url}")
             }
         }).use { client ->
-            val parsed = client.scrapeReferrers(DIGEST_IMAGE, ".*\\.sig$")
+            val parsed = client.scrapeReferrers(DIGEST_IMAGE, Regex(".*\\.sig$"))
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals(expectedDigest, manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)

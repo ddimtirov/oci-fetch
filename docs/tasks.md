@@ -5,9 +5,12 @@
 * [ ] Try to replace the Bearer toke auth with a Ktor plugin
                          
 # Pagination and Non-OCI APIs 
-* [ ] Support pagination for tags
-* [ ] Add options to `oci get ...` to generically handle pagination 
-* [ ] Support the Legacy Docker Registry catalog API (rejected by the OCI standard), https://distribution.github.io/distribution/spec/api/#catalog -- used by Nexus, Artifactory, and Harbor 
+* [x] Support pagination for tags
+* [ ] Support pagination for referrers
+* [ ] Support pagination for generic links in the command-line client
+* [ ] Support the legacy Docker Registry catalog API (rejected by the OCI standard, used by Nexus, Artifactory, and Harbor) 
+      https://distribution.github.io/distribution/spec/api/#catalog  
+* [ ] Support pagination for catalog entries
 
 # Layer functionality
 * [ ] Implement: `oci-fetch layer indices <ociImageRef> [<layer-file-path>]`
