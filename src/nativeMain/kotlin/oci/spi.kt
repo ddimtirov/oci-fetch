@@ -6,7 +6,9 @@ import io.ktor.client.engine.curl.Curl
 /**
  * Creates a native-specific HttpClient engine using Curl.
  */
-internal actual fun createHttpClient(): HttpClient = HttpClient(Curl)
+internal actual fun createHttpClient(): HttpClient = HttpClient(Curl) {
+    installOciBearerTokenAuth()
+}
 
 /**
  * Native-specific URL encoding.

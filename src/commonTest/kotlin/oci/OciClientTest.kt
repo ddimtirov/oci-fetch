@@ -6,6 +6,7 @@ import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.fullPath
 import io.ktor.http.headersOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -20,6 +21,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -29,6 +32,72 @@ private const val OCI_IMAGE_CONTENT_TYPE = "application/vnd.oci.image.index.v1+j
 private val DIGEST_IMAGE = OciRef("registry.example.com", "library/alpine", SUBJECT_DIGEST, true)
 
 class OciClientTest {
+
+    @Test
+    fun bearerTokenUrlParsesHeader() {
+        assertEquals(
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Alibrary%2Falpine%3Apull",
+            bearerTokenUrl("Bearer realm=\"https://auth.docker.io/token\",service=\"registry.docker.io\",scope=\"repository:library/alpine:pull\""),
+        )
+    }
+
+    @Test
+    fun bearerTokenUrlRejectsWrongSchema() {
+        assertFailsWith<IllegalStateException> {
+            bearerTokenUrl("Basic realm=\"https://auth.example.com/token\",service=\"registry.example.com\"")
+        }
+    }
+
+    @Test
+    fun requestUrlUsesBearerPluginToFetchTokenAndRetry() = runTest {
+        var resourceRequests = 0
+        var tokenRequests = 0
+        val client = OciClient(mockClientWithBearerAuth { req ->
+            when {
+                req.url.fullPath.startsWith("/v2/library/alpine/manifests/latest") -> {
+                    resourceRequests += 1
+                    val authHeader = req.headers[HttpHeaders.Authorization]
+                    if (authHeader == null) {
+                        respond(
+                            content = "unauthorized",
+                            status = HttpStatusCode.Unauthorized,
+                            headers = headersOf(
+                                HttpHeaders.WWWAuthenticate,
+                                "Bearer realm=\"https://auth.example.com/token\",service=\"registry.example.com\",scope=\"repository:library/alpine:pull\""
+                            ),
+                        )
+                    } else {
+                        assertEquals("Bearer test-token", authHeader)
+                        respond(
+                            content = "{\"schemaVersion\":2,\"config\":{}}",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/vnd.oci.image.manifest.v1+json"),
+                        )
+                    }
+                }
+
+                req.url.host == "auth.example.com" -> {
+                    tokenRequests += 1
+                    assertNull(req.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = "{\"token\":\"test-token\"}",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+                else -> error("Unexpected request: ${req.url}")
+            }
+        })
+
+        client.use {
+            val response = it.requestUrl("https://registry.example.com/v2/library/alpine/manifests/latest", OciClientImpl.acceptManifest)
+            assertEquals(HttpStatusCode.OK, response.status)
+        }
+
+        assertEquals(2, resourceRequests)
+        assertEquals(1, tokenRequests)
+    }
 
     @Test
     fun testClientInstantiation() = runTest {
@@ -288,5 +357,9 @@ class OciClientTest {
     }
 
     private fun mockClient(handler: MockRequestHandler): HttpClient = HttpClient(MockEngine(handler))
+
+    private fun mockClientWithBearerAuth(handler: MockRequestHandler): HttpClient = HttpClient(MockEngine(handler)) {
+        installOciBearerTokenAuth()
+    }
     private fun json(string: String): JsonObject = Json.parseToJsonElement(string).jsonObject
 }

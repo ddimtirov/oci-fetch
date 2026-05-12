@@ -43,29 +43,9 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
     }
 
     override suspend fun requestUrl(url: String, acceptHeader: String?): HttpResponse {
-        val initialResponse = client.get(url) {
-            headers {
-                acceptHeader?.let { header(HttpHeaders.Accept, it) }
-            }
-        }
-        if (initialResponse.status != HttpStatusCode.Unauthorized) return initialResponse
-
-        // Example: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/alpine:pull"
-        val wwwAuthenticateHeader = initialResponse.headers[HttpHeaders.WWWAuthenticate]
-        checkNotNull(wwwAuthenticateHeader) { "WWW-Authenticate header is missing" }
-
-        val tokenUrl = bearerTokenUrl(wwwAuthenticateHeader)
-        val tokenResponse = client.get(tokenUrl)
-        check(tokenResponse.status == HttpStatusCode.OK) { "Failed to fetch token: ${tokenResponse.status}" }
-
-        val json = Json.parseToJsonElement(tokenResponse.bodyAsText()).jsonObject
-        val token = (json["token"] ?: json["access_token"])?.jsonPrimitive?.content
-        checkNotNull(token) { "Token is missing in response $tokenResponse" }
-
         return client.get(url) {
             headers {
-                if (acceptHeader != null) header(HttpHeaders.Accept, acceptHeader)
-                header(HttpHeaders.Authorization, "Bearer $token")
+                acceptHeader?.let { header(HttpHeaders.Accept, it) }
             }
         }
     }
@@ -280,34 +260,6 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
             require(selector.matches(it)) { "Manifest does not match platform constraints" }
         }
         return image
-    }
-
-    fun bearerTokenUrl(wwwAuthenticateHeader: String): String {
-        check(wwwAuthenticateHeader.contains(" ")) {
-            "WWW-Authenticate header is missing schema: $wwwAuthenticateHeader"
-        }
-
-        // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/WWW-Authenticate
-        val (schema, params) = wwwAuthenticateHeader.split(" ", limit = 2).map { it.trim() }
-        val challengeParams: Map<String, String> = params
-            .split(',')
-            .map { kvStr -> kvStr.split('=', limit = 2).map { it.trim('"') } }
-            .filter { it.size == 2 && it[0].isNotEmpty() }
-            .associate { it[0] to it[1] }
-
-        val tokenUrlRealm = challengeParams["realm"]
-        val tokenUrlParams = challengeParams
-            .filterKeys { it != "realm" }
-            .map { (k, v) -> "$k=${urlEncode(v)}" }
-            .joinToString("&")
-
-        check(tokenUrlRealm != null) { "Realm is missing in WWW-Authenticate header: $wwwAuthenticateHeader" }
-        check(tokenUrlRealm.isNotEmpty()) { "Realm is empty in WWW-Authenticate header: $wwwAuthenticateHeader" }
-        check(schema.equals("Bearer", ignoreCase = true)) { "Schema is not Bearer (the only one supported): $wwwAuthenticateHeader" }
-        return when {
-            tokenUrlParams.isEmpty() -> tokenUrlRealm
-            else -> "$tokenUrlRealm?$tokenUrlParams"
-        }
     }
 
     private suspend fun referrersCosignConvention(ref: OciRef, artifactType: String?): JsonObject {

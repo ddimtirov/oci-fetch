@@ -2,7 +2,7 @@
 * [ ] Implement credentials caching using Ktor plugin
 * [ ] Implement request body caching for ETag and Last-Modified headers using Ktor plugin
 * [ ] Implement special handling of the content-addressed blob-caching as it is guaranteed immmutable
-* [ ] Try to replace the Bearer toke auth with a Ktor plugin
+* [x] Try to replace the Bearer toke auth with a Ktor plugin
                          
 # Pagination and Non-OCI APIs 
 * [x] Support pagination for tags
