@@ -66,6 +66,15 @@ The `oci-fetch` library is a Kotlin Multiplatform SDK for interacting with OCI (
 - `ImageIndexArtifacts(ref, index?, images)` — the result of `fetchAllMetadata()`: the optional top-level index JSON plus a list of per-platform `ImageArtifacts`.
 - `ImageArtifacts(ref, manifest, config?)` — a single platform image's manifest and optional config JSON.
 
+## Pagination (`HttpResponse.nextPageUrl`)
+
+**Responsibility:** Extract the next-page URL from an OCI registry response, following the [OCI Distribution Spec pagination](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#pagination) convention based on the `Link` header with `rel="next"`.
+
+**API:**
+- `HttpResponse.nextPageUrl(registry, v2endpoint)` — returns the absolute URL of the next page, or `null` when no further pages exist. Handles absolute URLs, absolute paths, relative `v2/` paths, and query-only links by normalising them against the given registry and endpoint.
+
+**Usage:** Used internally by `OciClient` to transparently paginate tag lists, repository lists, and referrers responses. Can also be called directly on any `HttpResponse` obtained from an OCI registry endpoint.
+
 ## Formatters
 
 **Responsibility:** Convert OCI JSON structures into human-readable or script-friendly output formats.

@@ -190,6 +190,7 @@ class OciClientTest {
     @Test
     fun apiReturnsBody_whenServerFiltered() = runTest {
         val responseJson = """{"schemaVersion":2,"manifests":[{"digest":"sha256:s","artifactType":"application/sig"}]}"""
+        val expectedJson = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"sha256:s","artifactType":"application/sig"}]}"""
 
         OciClient(mockClient { req ->
             assertTrue(req.url.encodedPath.endsWith("/v2/library/alpine/referrers/$SUBJECT_DIGEST"))
@@ -204,7 +205,7 @@ class OciClientTest {
             )
         }).use { client ->
             val result = client.fetchReferrers(DIGEST_IMAGE, "application/sig")
-            assertEquals(Json.parseToJsonElement(responseJson).jsonObject, result)
+            assertEquals(Json.parseToJsonElement(expectedJson).jsonObject, result)
         }
     }
 
@@ -226,6 +227,60 @@ class OciClientTest {
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals("application/sig", manifests[0].jsonObject["artifactType"]?.jsonPrimitive?.content)
+        }
+    }
+
+    @Test
+    fun referrersApiPaginatesMergesManifests() = runTest {
+        val page1 = """{"schemaVersion":2,"manifests":[{"digest":"sha256:a","artifactType":"application/sig"}]}"""
+        val page2 = """{"schemaVersion":2,"manifests":[{"digest":"sha256:b","artifactType":"application/sbom"}]}"""
+
+        OciClient(mockClient { req ->
+            val path = req.url.encodedPath
+            val query = req.url.encodedQuery
+            when {
+                path.contains("/referrers/") && query.isEmpty() -> respond(
+                    content = page1,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(
+                        HttpHeaders.ContentType to listOf(OCI_IMAGE_CONTENT_TYPE),
+                        HttpHeaders.Link to listOf("</v2/library/alpine/referrers/$SUBJECT_DIGEST?n=1&next=token>; rel=\"next\"")
+                    )
+                )
+                path.contains("/referrers/") && query.contains("next=token") -> respond(
+                    content = page2,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, OCI_IMAGE_CONTENT_TYPE)
+                )
+                else -> error("Unexpected request: ${req.url}")
+            }
+        }).use { client ->
+            val result = client.fetchReferrers(DIGEST_IMAGE)
+            val manifests = result["manifests"]!!.jsonArray
+            assertEquals(2, manifests.size)
+            assertEquals("sha256:a", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
+            assertEquals("sha256:b", manifests[1].jsonObject["digest"]?.jsonPrimitive?.content)
+        }
+    }
+
+    @Test
+    fun referrersApiPaginationDetectsLoop() = runTest {
+        val page = """{"schemaVersion":2,"manifests":[{"digest":"sha256:a","artifactType":"application/sig"}]}"""
+        val selfLinkUrl = "/v2/library/alpine/referrers/$SUBJECT_DIGEST"
+
+        OciClient(mockClient { _ ->
+            respond(
+                content = page,
+                status = HttpStatusCode.OK,
+                headers = headersOf(
+                    HttpHeaders.ContentType to listOf(OCI_IMAGE_CONTENT_TYPE),
+                    HttpHeaders.Link to listOf("<$selfLinkUrl>; rel=\"next\"")
+                )
+            )
+        }).use { client ->
+            assertFails {
+                client.fetchReferrers(DIGEST_IMAGE)
+            }
         }
     }
 

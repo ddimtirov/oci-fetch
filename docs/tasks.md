@@ -2,7 +2,7 @@
 * [x] Support the legacy Docker Registry catalog API (rejected by the OCI standard, used by Nexus, Artifactory, and Harbor)
       https://distribution.github.io/distribution/spec/api/#catalog
 * [x] Support pagination for tags
-* [ ] Support pagination for referrers
+* [x] Support pagination for referrers
 * [ ] Support pagination for generic links in the command-line client
 
 # Layer functionality
@@ -17,3 +17,11 @@
 * [ ] Implement: `oci-fetch caches purge credentials --min-age <seconds> --domain <domain>`
 * [ ] Implement: `oci-fetch caches purge manifests --min-size <bytes> --min-age <seconds> <ociImageRefs>...`
 * [ ] Implement: `oci-fetch caches purge blobs --min-size <bytes> --min-age <seconds> <ociImageRefs>...`
+
+# Future
+* [ ] Split `oci-fetch-cli` `oci-fetch-lib` into separate module
+* [ ] Port OCI Scrape to KMP
+* [ ] Implement RocksDB or SQLite storage for staging
+* [ ] Implement analytics 
+
+ 

@@ -38,8 +38,6 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
             "application/vnd.docker.container.image.v1+json",
             "application/octet-stream",
         ).joinToString(",")
-
-        private val nextRelRegex = Regex("""\brel\s*=\s*"?next"?""", RegexOption.IGNORE_CASE)
     }
 
     override suspend fun requestUrl(url: String, acceptHeader: String?): HttpResponse {
@@ -75,58 +73,6 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
     override suspend fun fetchAllRepositoriesDocker(registry: String): List<String> =
         paginatedStrings(registry, "_catalog") { it["repositories"] }
-
-    private suspend fun paginatedStrings(
-        registry: String,
-        endpoint: String,
-        extractStrings: (JsonObject) -> JsonElement?
-    ): List<String> {
-        val initialUrl = "https://$registry/v2/$endpoint"
-        val visitedPages = mutableSetOf<String>()
-        val results = mutableListOf<String>()
-
-        var nextPageUrl: String? = initialUrl
-        while (nextPageUrl != null) {
-            check(visitedPages.add(nextPageUrl)) {
-                "Detected pagination loop at $nextPageUrl"
-            }
-            val response = requestUrl(nextPageUrl)
-            results += run {
-                check(response.status == HttpStatusCode.OK) { "Failed to fetch $endpoint: ${response.status}" }
-                val body = response.bodyAsText()
-                val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
-                extractStrings(json)?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-            }
-            nextPageUrl = nextPageUrl(response)?.let {
-                when {
-                    it.startsWith("https://") || it.startsWith("http://") -> it
-                    it.startsWith("/") -> "https://$registry$it"
-                    it.startsWith("v2/") -> "https://$registry/$it"
-                    it.startsWith("?") -> "https://$registry/v2/$endpoint$it"
-                    else -> error("Unsupported pagination URL in Link header: $it")
-                }
-            }
-        }
-        return results.distinct()
-    }
-
-    private fun nextPageUrl(response: HttpResponse): String? {
-        val linkHeaders = response.headers.getAll(HttpHeaders.Link) ?: return null
-
-        val linkHeader = linkHeaders
-            .flatMap { it.split(',') }
-            .map { it.trim() }
-            .firstOrNull { nextRelRegex.containsMatchIn(it) }
-            ?: return null
-
-        val rawUrl = linkHeader.substringBefore(';').trim()
-        check(rawUrl.startsWith("<") && rawUrl.endsWith(">")) {
-            "Malformed pagination Link header: $linkHeader"
-        }
-
-        return rawUrl.removePrefix("<").removeSuffix(">")
-    }
-
 
     override suspend fun requestManifest(image: OciRef): HttpResponse =
         requestUrl("https://${image.registry}/v2/${image.repository}/manifests/${image.reference}", acceptManifest)
@@ -368,30 +314,72 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
      */
     private suspend fun referrersOciApi(ref: OciRef, artifactType: String?): JsonObject? {
         check(ref.isDigest) { "Referrers API requires a digest-based reference" }
-        val apiUrl = "https://${ref.registry}/v2/${ref.repository}/referrers/${ref.reference}"
         val query = if (artifactType != null) "?artifactType=${urlEncode(artifactType)}" else ""
-        val response = requestUrl(apiUrl + query, "application/vnd.oci.image.index.v1+json")
 
-        if (response.status != HttpStatusCode.OK) {
-            // We only fall back if the Referrers API returned an empty list OR 404.
-            require(response.status == HttpStatusCode.NotFound) {
-                "Referrers API returned ${response.status} for $apiUrl$query"
+        val allManifests = mutableListOf<JsonElement>()
+        val visitedPages = mutableSetOf<String>()
+        var nextPageUrl: String? = "https://${ref.registry}/v2/${ref.repository}/referrers/${ref.reference}" + query
+
+        val registry = ref.registry
+        val endpoint = "${ref.repository}/referrers/${ref.reference}"
+        val extractStrings: (JsonObject) -> JsonElement? = { it["manifests"] }
+
+        while (nextPageUrl != null) {
+            check(visitedPages.add(nextPageUrl)) { "Detected pagination loop at $nextPageUrl" }
+
+            val response = requestUrl(nextPageUrl, "application/vnd.oci.image.index.v1+json")
+            if (response.status != HttpStatusCode.OK) {
+                require(response.status == HttpStatusCode.NotFound) {
+                    "Referrers API returned ${response.status} for $nextPageUrl"
+                }
+                return null
             }
-            return null
+
+            val body = if (artifactType == null) {
+                response.bodyAsText()
+            } else {
+                val filtersApplied = response.headers["OCI-Filters-Applied"]
+                clientSideArtifactTypeFilter(response.bodyAsText(), artifactType, filtersApplied)
+            }
+
+            val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
+            val extracted = extractStrings(json)?.jsonArray ?: emptyList()
+            nextPageUrl = response.nextPageUrl(registry, endpoint)
+
+            allManifests.addAll(extracted)
         }
 
-        val text = if (artifactType == null) {
-            response.bodyAsText()
-        } else {
-            val filtersAppliedHeader = response.headers["OCI-Filters-Applied"]
-            clientSideArtifactTypeFilter(response.bodyAsText(), artifactType, filtersAppliedHeader)
-        }
+        if (allManifests.isEmpty()) return null
 
-        // However, some registries (like Quay) might support Referrers API but return empty,
-        // while still having Cosign tags.
-        val json = Json.parseToJsonElement(text).jsonObject.rethrowErrors()
-        return if (!json["manifests"]?.jsonArray.isNullOrEmpty()) json else null
-        // If empty, fall through to tag-schema and Cosign discovery
+        return JsonObject(
+            mapOf(
+                "schemaVersion" to JsonPrimitive(2),
+                "mediaType" to JsonPrimitive("application/vnd.oci.image.index.v1+json"),
+                "manifests" to JsonArray(allManifests),
+            )
+        )
+    }
+
+    private suspend fun paginatedStrings(registry: String, endpoint: String, extractStrings: (JsonObject) -> JsonElement?): List<String> {
+        val initialUrl = "https://$registry/v2/$endpoint"
+        val visitedPages = mutableSetOf<String>()
+        val results = mutableListOf<String>()
+
+        var nextPageUrl: String? = initialUrl
+        while (nextPageUrl != null) {
+            check(visitedPages.add(nextPageUrl)) { "Detected pagination loop at $nextPageUrl" }
+
+            val response = requestUrl(nextPageUrl)
+            check(response.status == HttpStatusCode.OK) { "Failed to fetch $endpoint: ${response.status}" }
+            val body = response.bodyAsText()
+
+            val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
+            val extracted = extractStrings(json)?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+            nextPageUrl = response.nextPageUrl(registry, endpoint)
+
+            results.addAll(extracted)
+        }
+        return results.distinct()
     }
 
     /**
