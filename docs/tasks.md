@@ -1,5 +1,5 @@
 # Pagination and Non-OCI APIs 
-* [ ] Support the legacy Docker Registry catalog API (rejected by the OCI standard, used by Nexus, Artifactory, and Harbor)
+* [x] Support the legacy Docker Registry catalog API (rejected by the OCI standard, used by Nexus, Artifactory, and Harbor)
       https://distribution.github.io/distribution/spec/api/#catalog
 * [x] Support pagination for tags
 * [ ] Support pagination for referrers

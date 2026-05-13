@@ -88,6 +88,16 @@ interface OciClient : AutoCloseable {
     suspend fun scrapeReferrers(subject: OciRef, tags: Regex, artifactTypeFilter: Regex? = null): JsonObject
 
     /**
+     * Requests a GET response for the Docker Registry `_catalog` endpoint.
+     */
+    suspend fun requestRepositoriesDocker(registry: String): HttpResponse
+
+    /**
+     * Returns all repository names from the Docker Registry `_catalog` endpoint, using pagination.
+     */
+    suspend fun fetchRepositoriesDocker(registry: String): List<String>
+
+    /**
      * Resolves a reference to a specific image manifest based on platform constraints.
      * If the reference is an index, it follows it using the selector.
      */

@@ -119,6 +119,41 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         return rawUrl.removePrefix("<").removeSuffix(">")
     }
 
+    override suspend fun requestRepositoriesDocker(registry: String): HttpResponse {
+        val url = "https://$registry/v2/_catalog"
+        return requestUrl(url)
+    }
+
+    override suspend fun fetchRepositoriesDocker(registry: String): List<String> {
+        val initialUrl = "https://$registry/v2/_catalog"
+        val repositories = mutableListOf<String>()
+        val visitedPages = mutableSetOf<String>()
+        var nextPageUrl: String? = initialUrl
+
+        while (nextPageUrl != null) {
+            check(visitedPages.add(nextPageUrl)) {
+                "Detected catalog pagination loop at $nextPageUrl"
+            }
+            val response = requestUrl(nextPageUrl)
+            repositories += run {
+                check(response.status == HttpStatusCode.OK) { "Failed to fetch catalog: ${response.status}" }
+                val body = response.bodyAsText()
+                val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
+                json["repositories"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+            }
+            nextPageUrl = nextPageUrl(response)?.let {
+                when {
+                    it.startsWith("https://") || it.startsWith("http://") -> it
+                    it.startsWith("/") -> "https://$registry$it"
+                    it.startsWith("v2/") -> "https://$registry/$it"
+                    it.startsWith("?") -> "https://$registry/v2/_catalog$it"
+                    else -> error("Unsupported pagination URL in catalog Link header: $it")
+                }
+            }
+        }
+        return repositories.distinct()
+    }
+
     override suspend fun requestManifest(image: OciRef): HttpResponse =
         requestUrl("https://${image.registry}/v2/${image.repository}/manifests/${image.reference}", acceptManifest)
 
