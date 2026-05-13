@@ -154,7 +154,7 @@ class OciClientTest {
     }
 
     @Test
-    fun fetchTagsListFollowsPaginationLinkHeader() = runTest {
+    fun fetchTagsFollowsPaginationLinkHeader() = runTest {
         val observedLastParams = mutableListOf<String?>()
 
         OciClient(mockClient { req ->
@@ -181,7 +181,7 @@ class OciClientTest {
                 else -> error("Unexpected request: ${req.url}")
             }
         }).use { client ->
-            val tags = client.fetchTagsList("registry.example.com", "library/alpine")
+            val tags = client.fetchAllTags("registry.example.com", "library/alpine")
             assertEquals(listOf("1", "2", "3"), tags)
             assertEquals(listOf(null, "2"), observedLastParams)
         }

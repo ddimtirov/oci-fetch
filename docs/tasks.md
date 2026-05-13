@@ -4,7 +4,6 @@
 * [x] Support pagination for tags
 * [ ] Support pagination for referrers
 * [ ] Support pagination for generic links in the command-line client
-* [ ] Support pagination for catalog entries
 
 # Layer functionality
 * [ ] Implement: `oci-fetch layer indices <ociImageRef> [<layer-file-path>]`

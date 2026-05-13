@@ -29,7 +29,7 @@ class OciClientIT {
     fun ubiTagListIsLarge() = runTest {
         if (isBrowser() || isNative()) return@runTest
         OciClient().use { client ->
-            val tags = client.fetchTagsList(OciRef.parse("registry.access.redhat.com/ubi9/ubi"))
+            val tags = client.fetchAllTags(OciRef.parse("registry.access.redhat.com/ubi9/ubi"))
 
             assertTrue(tags.size > 100, "Expected Red Hat UBI tag list to contain more than 100 tags, but got ${tags.size}")
         }

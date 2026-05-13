@@ -5,6 +5,7 @@ A Kotlin Multiplatform library **and** command-line tool for inspecting OCI (Ope
 ## What Can It Do?
 
 - **List tags** for any repository
+- **List repositories** in a registry via the Docker `_catalog` API
 - **Inspect image indexes** (multi-arch manifests) and platform-specific manifests
 - **Read image configuration** (env vars, entrypoint, labels, layer history)
 - **Discover supply-chain artifacts** — signatures, SBOMs, and attestations via the OCI Referrers API
@@ -23,7 +24,10 @@ suspend fun main() {
         val ref = OciRef.parse("registry-1.docker.io/library/alpine:latest")
 
         // List tags
-        val tags = client.fetchTagsList(ref)
+        val tags = client.fetchAllTags(ref)
+
+        // List repositories in a registry (Docker _catalog API)
+        val repos = client.fetchAllRepositoriesDocker("registry-1.docker.io")
 
         // Fetch manifest
         val response = client.requestManifest(ref)

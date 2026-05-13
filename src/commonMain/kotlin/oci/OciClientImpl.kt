@@ -50,57 +50,65 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
         }
     }
 
-    override suspend fun requestBlob(registry: String, repository: String, digest: String): HttpResponse {
-        val url = "https://${registry}/v2/${repository}/blobs/${digest}"
-        return requestUrl(url, acceptConfig)
-    }
+    override suspend fun requestBlob(registry: String, repository: String, digest: String): HttpResponse =
+        requestUrl("https://${registry}/v2/${repository}/blobs/${digest}", acceptConfig)
 
     override suspend fun requestBlob(image: OciRef): HttpResponse {
         check(image.isDigest) { "ImageRef must be a digest: $image" }
         return requestBlob(image.registry, image.repository, image.reference)
     }
 
-    override suspend fun requestTags(registry: String, repository: String): HttpResponse {
-        val url = "https://$registry/v2/$repository/tags/list"
-        return requestUrl(url)
-    }
+    override suspend fun requestTags(registry: String, repository: String): HttpResponse =
+        requestUrl("https://$registry/v2/$repository/tags/list")
 
     override suspend fun requestTags(image: OciRef): HttpResponse =
         requestTags(image.registry, image.repository)
 
-    override suspend fun fetchTagsList(image: OciRef): List<String> =
-        fetchTagsList(image.registry, image.repository)
+    override suspend fun fetchAllTags(image: OciRef): List<String> =
+        fetchAllTags(image.registry, image.repository)
 
-    override suspend fun fetchTagsList(registry: String, repository: String): List<String> {
-        val initialUrl = "https://$registry/v2/$repository/tags/list"
-        val tags = mutableListOf<String>()
+    override suspend fun fetchAllTags(registry: String, repository: String): List<String> =
+        paginatedStrings(registry, "$repository/tags/list") { it["tags"] }
+
+    override suspend fun requestRepositoriesDocker(registry: String): HttpResponse =
+        requestUrl("https://$registry/v2/_catalog")
+
+    override suspend fun fetchAllRepositoriesDocker(registry: String): List<String> =
+        paginatedStrings(registry, "_catalog") { it["repositories"] }
+
+    private suspend fun paginatedStrings(
+        registry: String,
+        endpoint: String,
+        extractStrings: (JsonObject) -> JsonElement?
+    ): List<String> {
+        val initialUrl = "https://$registry/v2/$endpoint"
         val visitedPages = mutableSetOf<String>()
-        var nextPageUrl: String? = initialUrl
+        val results = mutableListOf<String>()
 
+        var nextPageUrl: String? = initialUrl
         while (nextPageUrl != null) {
             check(visitedPages.add(nextPageUrl)) {
-                "Detected tags pagination loop at $nextPageUrl"
+                "Detected pagination loop at $nextPageUrl"
             }
             val response = requestUrl(nextPageUrl)
-            tags += run {
-                check(response.status == HttpStatusCode.OK) { "Failed to fetch tags: ${response.status}" }
+            results += run {
+                check(response.status == HttpStatusCode.OK) { "Failed to fetch $endpoint: ${response.status}" }
                 val body = response.bodyAsText()
                 val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
-                json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+                extractStrings(json)?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
             }
             nextPageUrl = nextPageUrl(response)?.let {
                 when {
                     it.startsWith("https://") || it.startsWith("http://") -> it
                     it.startsWith("/") -> "https://$registry$it"
                     it.startsWith("v2/") -> "https://$registry/$it"
-                    it.startsWith("?") -> "https://$registry/v2/$repository/tags/list$it"
-                    else -> error("Unsupported pagination URL in tags Link header: $it")
+                    it.startsWith("?") -> "https://$registry/v2/$endpoint$it"
+                    else -> error("Unsupported pagination URL in Link header: $it")
                 }
             }
         }
-        return tags.distinct()
+        return results.distinct()
     }
-
 
     private fun nextPageUrl(response: HttpResponse): String? {
         val linkHeaders = response.headers.getAll(HttpHeaders.Link) ?: return null
@@ -113,46 +121,12 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
 
         val rawUrl = linkHeader.substringBefore(';').trim()
         check(rawUrl.startsWith("<") && rawUrl.endsWith(">")) {
-            "Malformed tags pagination Link header: $linkHeader"
+            "Malformed pagination Link header: $linkHeader"
         }
 
         return rawUrl.removePrefix("<").removeSuffix(">")
     }
 
-    override suspend fun requestRepositoriesDocker(registry: String): HttpResponse {
-        val url = "https://$registry/v2/_catalog"
-        return requestUrl(url)
-    }
-
-    override suspend fun fetchRepositoriesDocker(registry: String): List<String> {
-        val initialUrl = "https://$registry/v2/_catalog"
-        val repositories = mutableListOf<String>()
-        val visitedPages = mutableSetOf<String>()
-        var nextPageUrl: String? = initialUrl
-
-        while (nextPageUrl != null) {
-            check(visitedPages.add(nextPageUrl)) {
-                "Detected catalog pagination loop at $nextPageUrl"
-            }
-            val response = requestUrl(nextPageUrl)
-            repositories += run {
-                check(response.status == HttpStatusCode.OK) { "Failed to fetch catalog: ${response.status}" }
-                val body = response.bodyAsText()
-                val json = Json.parseToJsonElement(body).jsonObject.rethrowErrors()
-                json["repositories"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-            }
-            nextPageUrl = nextPageUrl(response)?.let {
-                when {
-                    it.startsWith("https://") || it.startsWith("http://") -> it
-                    it.startsWith("/") -> "https://$registry$it"
-                    it.startsWith("v2/") -> "https://$registry/$it"
-                    it.startsWith("?") -> "https://$registry/v2/_catalog$it"
-                    else -> error("Unsupported pagination URL in catalog Link header: $it")
-                }
-            }
-        }
-        return repositories.distinct()
-    }
 
     override suspend fun requestManifest(image: OciRef): HttpResponse =
         requestUrl("https://${image.registry}/v2/${image.repository}/manifests/${image.reference}", acceptManifest)
@@ -214,7 +188,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
     ): JsonObject {
         check(subject.isDigest) { "Scraping requires a digest-based reference" }
 
-        val fetchedTags = fetchTagsList(subject)
+        val fetchedTags = fetchAllTags(subject)
         val matchingTags = fetchedTags.filter { tags.containsMatchIn(it) }
         val matchingRefs = matchingTags.map { subject.withTag(it) }
         return referrersFromManifests(matchingRefs, artifactTypeFilter)

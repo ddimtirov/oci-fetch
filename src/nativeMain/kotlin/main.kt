@@ -252,7 +252,7 @@ class GetCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "ge
             val json = Json.parseToJsonElement(body)
             val prettyJson = Json { prettyPrint = true }
             return prettyJson.encodeToString(JsonElement.serializer(), json)
-        } catch (e: Exception) { // Not JSON, just return body
+        } catch (_: Exception) { // Not JSON, just return body
             return body
         }
     }
@@ -282,7 +282,7 @@ class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "t
             val response = client.requestTags(ref)
             response.bodyAsText()
         } else {
-            val tags = client.fetchTagsList(ref)
+            val tags = client.fetchAllTags(ref)
             tags.joinToString("\n")
         }
     }

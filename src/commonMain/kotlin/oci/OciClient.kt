@@ -34,10 +34,16 @@ interface OciClient : AutoCloseable {
 
     /**
      * Requests a GET response for a tags-list from the specified image reference.
+     *
+     * Note: while this allows inspecting the HTTP headers and low-level details,
+     * the actual payload is only the first page. Use [fetchAllTags] for pagination.
      */
     suspend fun requestTags(image: OciRef): HttpResponse
     /**
      * Requests a GET response for a tags-list from the specified registry and repository.
+     *
+     * Note: while this allows inspecting the HTTP headers and low-level details,
+     * the actual payload is only the first page. Use [fetchAllTags] for pagination.
      */
     suspend fun requestTags(registry: String, repository: String): HttpResponse
 
@@ -52,13 +58,13 @@ interface OciClient : AutoCloseable {
     suspend fun requestManifest(registry: String, repository: String, tag: String ="latest"): HttpResponse
 
     /**
-     * Returns all tags for the given image reference.
+     * Returns all tags for the given image reference, using pagination.
      */
-    suspend fun fetchTagsList(image: OciRef): List<String>
+    suspend fun fetchAllTags(image: OciRef): List<String>
     /**
-     * Returns all tags for the given registry and repository.
+     * Returns all tags for the given registry and repository, using pagination.
      */
-    suspend fun fetchTagsList(registry: String, repository: String): List<String>
+    suspend fun fetchAllTags(registry: String, repository: String): List<String>
 
     /**
      * Fetches all manifest and config blobs for the given image reference.
@@ -89,13 +95,24 @@ interface OciClient : AutoCloseable {
 
     /**
      * Requests a GET response for the Docker Registry `_catalog` endpoint.
+     *
+     * The [Catalog API](https://distribution.github.io/distribution/spec/api/#catalog)
+     * was rejected by the OCI standard, but it is still used by Nexus, Artifactory, Harbor,
+     * and other private registries.
+     *
+     * Note: while this allows inspecting the HTTP headers and low-level details,
+     * the actual payload is only the first page. Use [fetchAllRepositoriesDocker] for pagination.
      */
     suspend fun requestRepositoriesDocker(registry: String): HttpResponse
 
     /**
      * Returns all repository names from the Docker Registry `_catalog` endpoint, using pagination.
+     *
+     * The [Catalog API](https://distribution.github.io/distribution/spec/api/#catalog)
+     * was rejected by the OCI standard, but it is still used by Nexus, Artifactory, Harbor,
+     * and other private registries.
      */
-    suspend fun fetchRepositoriesDocker(registry: String): List<String>
+    suspend fun fetchAllRepositoriesDocker(registry: String): List<String>
 
     /**
      * Resolves a reference to a specific image manifest based on platform constraints.

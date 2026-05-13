@@ -11,14 +11,16 @@ The `oci-fetch` library is a Kotlin Multiplatform SDK for interacting with OCI (
 - `requestBlob()` — fetch a blob by digest.
 - `requestTags()` — fetch the raw tags-list response.
 - `requestManifest()` — fetch an image manifest or index.
-- `fetchTagsList()` — return parsed `List<String>` of tags.
+- `fetchAllTags()` — return parsed `List<String>` of tags.
+- `requestRepositoriesDocker()` — fetch the raw response from the Docker Registry `_catalog` endpoint.
+- `fetchAllRepositoriesDocker()` — return parsed `List<String>` of repository names from the Docker `_catalog` endpoint, handling pagination automatically.
 - `fetchAllMetadata()` — recursively fetch all manifests and configs for an image reference.
 - `fetchReferrers()` — query the OCI Referrers API (with Cosign tag-schema fallback) for supply-chain artifacts referencing a digest.
 - `scrapeReferrers()` — discover referrers by scanning tags matching a regex.
 - `resolveToImageManifest()` — ensure that we have a reference pointing to an image manifest. If the initial reference points to an index, return a new reference pointing to a platform-specific image manifest by using the ptovided `PlatformSelector`.
 - `isOciImageIndex()` / `isOciImageManifest()` — detect whether a JSON payload is an index or image manifest.
 
-**Naming conventions:** `requestXXX()` methods return a raw Ktor `HttpResponse`; `fetchXXX()` methods handle HTTP details and return parsed/typed results; `isOciXXX()` methods detect payload types.
+**Naming conventions:** `requestXXX()` methods return a raw Ktor `HttpResponse`; `fetchXXX()` methods handle HTTP details and return parsed/typed results; `isOciXXX()` methods detect payload types. The `xxxDocker` suffix indicates Docker-specific (non-OCI-standard) endpoints.
 
 **Usage:** `OciClient` is an interface. Create via the companion factory `OciClient(httpClient?)`. Supply your own `HttpClient` to customize transport (proxies, timeouts, logging) — when provided, the caller manages its lifecycle.
 
