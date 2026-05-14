@@ -236,25 +236,56 @@ class GetCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "ge
     override fun run() {
         runBlocking {
             val raw = globalRaw()
-            val output = OciClient().use { client ->
-                queryAndFormat(client, raw)
+            OciClient().use { client ->
+                fetchWithPagination(client, raw)
             }
-            println(output)
         }
     }
 
-    private suspend fun queryAndFormat(client: OciClient, raw: Boolean): String {
-        val response = client.requestUrl(url, null)
-        val body = response.bodyAsText()
-        if (raw) return body
+    private suspend fun fetchWithPagination(client: OciClient, raw: Boolean) {
+        val (registry, v2endpoint) = extractRegistryAndEndpoint(url)
+        val visitedPages = mutableSetOf<String>()
+        var nextUrl: String? = url
+        var firstPage = true
 
-        try {
-            val json = Json.parseToJsonElement(body)
-            val prettyJson = Json { prettyPrint = true }
-            return prettyJson.encodeToString(JsonElement.serializer(), json)
-        } catch (_: Exception) { // Not JSON, just return body
-            return body
+        while (nextUrl != null) {
+            check(visitedPages.add(nextUrl)) { "Detected pagination loop at $nextUrl" }
+
+            val response = client.requestUrl(nextUrl, null)
+            val body = response.bodyAsText()
+
+            if (!firstPage) print("---\n")
+            firstPage = false
+
+            if (raw) {
+                print(body)
+            } else {
+                try {
+                    val json = Json.parseToJsonElement(body)
+                    val prettyJson = Json { prettyPrint = true }
+                    print(prettyJson.encodeToString(JsonElement.serializer(), json))
+                } catch (_: Exception) {
+                    print("$body\n")
+                }
+            }
+
+            nextUrl = if (registry != null && v2endpoint != null) {
+                response.nextPageUrl(registry, v2endpoint)
+            } else {
+                response.nextPageUrl("", "")
+            }
         }
+        println()
+    }
+
+    private fun extractRegistryAndEndpoint(url: String): Pair<String?, String?> {
+        val withoutScheme = url.removePrefix("https://").removePrefix("http://")
+        val slashIndex = withoutScheme.indexOf('/')
+        if (slashIndex < 0) return Pair(null, null)
+        val registry = withoutScheme.substring(0, slashIndex)
+        val path = withoutScheme.substring(slashIndex + 1)
+        val v2endpoint = if (path.startsWith("v2/")) path.removePrefix("v2/").substringBefore('?') else null
+        return Pair(registry, v2endpoint)
     }
 }
 

@@ -1,10 +1,3 @@
-# Pagination and Non-OCI APIs 
-* [x] Support the legacy Docker Registry catalog API (rejected by the OCI standard, used by Nexus, Artifactory, and Harbor)
-      https://distribution.github.io/distribution/spec/api/#catalog
-* [x] Support pagination for tags
-* [x] Support pagination for referrers
-* [ ] Support pagination for generic links in the command-line client
-
 # Layer functionality
 * [ ] Implement: `oci-fetch layer indices <ociImageRef> [<layer-file-path>]`
 * [ ] Implement: `oci-fetch layer filenames <ociImageRef> <layer-offset-or-digest>`
