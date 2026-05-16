@@ -39,6 +39,14 @@ kotlin {
         binaries.executable {
             entryPoint = "main"
         }
+        // FIXME: Remove when Clikt fixes the issue. See https://kotl.in/disable-native-cache
+        @OptIn(org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCacheApi::class)
+        binaries.all {
+            disableNativeCache(
+                version = org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion.`2_4_0`,
+                reason = "Workaround for Clikt 5.x duplicate symbol linker error (selfAndAncestors)."
+            )
+        }
     }
     mingwX64() {
         binaries.executable {
