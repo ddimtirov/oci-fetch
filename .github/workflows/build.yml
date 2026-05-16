@@ -1,0 +1,87 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build KMP Library & Linux Binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install libcurl development headers
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Build KMP library
+        run: ./gradlew assemble
+
+      - name: Run tests
+        run: ./gradlew check
+
+      - name: Upload JVM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-fetch-jvm
+          path: build/libs/*jvm*.jar
+
+      - name: Upload JS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-fetch-js
+          path: build/compileSync/js/main/productionExecutable/
+
+      - name: Upload WASM-JS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-fetch-wasm-js
+          path: build/compileSync/wasmJs/main/productionExecutable/
+
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-fetch-linux-x64
+          path: build/bin/linuxX64/releaseExecutable/
+
+  build-windows:
+    name: Build Windows Binary
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install libcurl via vcpkg
+        run: |
+          vcpkg install curl:x64-windows
+          echo "CURL_LIBRARY=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows" >> $env:GITHUB_ENV
+
+      - name: Build Windows binary
+        run: ./gradlew mingwX64Binaries
+
+      - name: Run Windows native tests
+        run: ./gradlew mingwX64Test
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-fetch-windows-x64
+          path: build/bin/mingwX64/releaseExecutable/
