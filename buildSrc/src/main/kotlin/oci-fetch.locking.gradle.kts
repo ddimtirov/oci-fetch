@@ -1,5 +1,5 @@
 // Dependency lockfile maintenance tasks.
-tasks.register("resolveAndLockAll") {
+val resolveAndLockAll = tasks.register("resolveAndLockAll") {
     group = "help"
     description = "Resolves and locks all resolvable configurations."
     notCompatibleWithConfigurationCache("Filters configurations at execution time")
@@ -14,5 +14,11 @@ tasks.register("resolveAndLockAll") {
         configurations
             .filter { it.isCanBeResolved }
             .forEach { it.resolve() }
+    }
+}
+
+plugins.withId("org.jetbrains.kotlin.multiplatform") {
+    resolveAndLockAll {
+        dependsOn(tasks.named("kotlinUpgradeYarnLock"))
     }
 }
