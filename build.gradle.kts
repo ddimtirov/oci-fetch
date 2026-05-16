@@ -8,12 +8,21 @@ plugins {
 }
 
 detekt {
-    config.setFrom(files("detekt.yml"))
     buildUponDefaultConfig = true
+    config.setFrom(files("detekt.yml"))
+    basePath = layout.buildDirectory.dir("reports/detekt")
 }
 
-group = "io.github.ddimtirov"
-version = "1.0-SNAPSHOT"
+tasks.named<dev.detekt.gradle.Detekt>("detekt") {
+    val sources = kotlin.sourceSets
+        .filter { !it.name.contains("test", ignoreCase = true) }
+        .flatMap { it.kotlin.sourceDirectories }
+    setSource(sources)
+    reports {
+        sarif.required = true
+        html.required = true
+    }
+}
 
 repositories {
     mavenCentral()
@@ -21,6 +30,12 @@ repositories {
 
 dependencyLocking {
     lockAllConfigurations()
+}
+
+java {
+    toolchain{
+        languageVersion = JavaLanguageVersion.of(25)
+    }
 }
 
 kotlin {
@@ -50,7 +65,7 @@ kotlin {
             )
         }
     }
-    mingwX64() {
+    mingwX64 {
         binaries.executable {
             entryPoint = "main"
         }

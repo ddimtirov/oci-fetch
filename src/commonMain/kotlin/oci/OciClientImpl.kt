@@ -312,6 +312,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
      * If OCI Referrers API is not supported or returns an empty index,
      * return null to indicate that fallback methods should be attempted.
      */
+    @Suppress("ReturnCount")
     private suspend fun referrersOciApi(ref: OciRef, artifactType: String?): JsonObject? {
         check(ref.isDigest) { "Referrers API requires a digest-based reference" }
         val query = if (artifactType != null) "?artifactType=${urlEncode(artifactType)}" else ""

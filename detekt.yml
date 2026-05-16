@@ -1,37 +1,25 @@
-formatting:
-  MaximumLineLength:
-    maxLineLength: 240
-
 complexity:
   active: true
   CyclomaticComplexMethod:
     active: true
-    threshold: 15
+    allowedComplexity: 20
   CognitiveComplexMethod:
     active: true
-    threshold: 15
+    allowedComplexity: 20
   TooManyFunctions:
     active: true
-    thresholdInFiles: 20
+    ignorePrivate: true
+    ignoreInternal: true
+    ignoreOverridden: true
+    allowedFunctionsPerInterface: 20
 
 style:
   active: true
   MaxLineLength:
     maxLineLength: 240
-  MagicNumber:
-    active: true
-    ignoreNumbers: ['-1', '0', '1', '2']
   WildcardImport:
+    active: false
+  ReturnCount:
     active: true
-
-potential-bugs:
-  active: true
-  EmptyCatchBlock:
-    active: true
-  UnsafeCallOnNullableType:
-    active: true
-
-performance:
-  active: true
-  UnnecessaryTemporaryObject:
-    active: true
+    excludeGuardClauses: true
+    excludeReturnFromLambda: true

@@ -108,9 +108,8 @@ class IndexCommand(
             formatTsvIndex(body, selector)
         } else { // infer basic index info
             val digest = response.headers["Docker-Content-Digest"] ?: ""
-            val mediaType = contentType
             "digest\tmediaType\tos\tarchitecture\tos.version\tos.features\tvariant\n" +
-                    "$digest\t$mediaType\t\t\t\t\t"
+                    "$digest\t$contentType\t\t\t\t\t"
         }
     }
 
@@ -231,6 +230,7 @@ class ConfigCommand(
 class GetCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "get") {
     override fun help(context: Context): String = "Get the url but supports the anonymous auth methods of container registries"
     val url by argument(help = "The URL to fetch")
+    private val prettyJson = Json { prettyPrint = true }
 
     @OptIn(ExperimentalForeignApi::class)
     override fun run() {
@@ -242,40 +242,31 @@ class GetCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "ge
         }
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun fetchWithPagination(client: OciClient, raw: Boolean) {
         val (registry, v2endpoint) = extractRegistryAndEndpoint(url)
         val visitedPages = mutableSetOf<String>()
         var nextUrl: String? = url
-        var firstPage = true
 
         while (nextUrl != null) {
+            if (visitedPages.isNotEmpty()) println("---")
+
             check(visitedPages.add(nextUrl)) { "Detected pagination loop at $nextUrl" }
-
             val response = client.requestUrl(nextUrl, null)
+
             val body = response.bodyAsText()
-
-            if (!firstPage) print("---\n")
-            firstPage = false
-
-            if (raw) {
-                print(body)
-            } else {
-                try {
-                    val json = Json.parseToJsonElement(body)
-                    val prettyJson = Json { prettyPrint = true }
-                    print(prettyJson.encodeToString(JsonElement.serializer(), json))
-                } catch (_: Exception) {
-                    print("$body\n")
-                }
+            val output = if (raw) {
+                body
+            } else try { // try to pretty-print, possibly not valid JSON, so may fail
+                val json = Json.parseToJsonElement(body)
+                prettyJson.encodeToString(JsonElement.serializer(), json)
+            } catch (_: Exception) {
+                body // fall back if the JSON pretty-printing failed
             }
+            println(output)
 
-            nextUrl = if (registry != null && v2endpoint != null) {
-                response.nextPageUrl(registry, v2endpoint)
-            } else {
-                response.nextPageUrl("", "")
-            }
+            nextUrl = response.nextPageUrl(registry ?: "", v2endpoint ?: "")
         }
-        println()
     }
 
     private fun extractRegistryAndEndpoint(url: String): Pair<String?, String?> {
@@ -319,10 +310,12 @@ class TagsCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "t
     }
 }
 
+private const val STDIN_SLURP_BUFFER_SIZE = 4096
+
 @OptIn(ExperimentalForeignApi::class)
 fun readStdin(): String = buildString {
     memScoped {
-        val bufferSize = 4096
+        val bufferSize = STDIN_SLURP_BUFFER_SIZE
         val buffer = allocArray<ByteVar>(bufferSize)
         while (feof(stdin) == 0) {
             val result = fgets(buffer, bufferSize, stdin)
@@ -349,7 +342,7 @@ class ParseCommand : CliktCommand(name = "parse") {
 class ParseFormatCommand(
     name: String,
     private val helpText: String,
-    protected val globalRaw: () -> Boolean,
+    private val globalRaw: () -> Boolean,
     private val formatter: (String) -> String
 ) : CliktCommand(name = name) {
     override fun help(context: Context): String = helpText
@@ -363,6 +356,12 @@ class ParseFormatCommand(
     }
 }
 
+private const val ERR_COMMAND_LINE_PARSING = 1
+private const val ERR_INTERNAL_ERROR = 10
+private const val ERR_NO_SUCH_PLATFORM = 11
+private const val ERR_AMBIGUOUS_PLATFORM = 12
+
+@Suppress("TooGenericExceptionCaught") // root error handler
 fun main(args: Array<String>) {
     val ociFetch = OciFetch()
     val metaCommand = MetaCommand()
@@ -391,16 +390,16 @@ fun main(args: Array<String>) {
         platform.posix.exit(0)
     } catch (e: CliktError) {
         ociFetch.echo(e.message ?: "Error: command line processing for ${e::class.simpleName}", err = true)
-        platform.posix.exit(1)
+        platform.posix.exit(ERR_COMMAND_LINE_PARSING)
     } catch (e: NoSuchPlatformSelectionException) {
         ociFetch.echo(platformSelectionError(e, e.available), err = true)
-        platform.posix.exit(11)
+        platform.posix.exit(ERR_NO_SUCH_PLATFORM)
     } catch (e: AmbiguousPlatformSelectionException) {
         ociFetch.echo(platformSelectionError(e, e.candidates), err = true)
-        platform.posix.exit(12)
-    } catch (e: Exception) {
-        ociFetch.echo("Error: " + (e.message ?: "Unknown error") , err = true)
-        platform.posix.exit(10)
+        platform.posix.exit(ERR_AMBIGUOUS_PLATFORM)
+    } catch (topLevel: Exception) {
+        ociFetch.echo("Error: " + (topLevel.message ?: "Unknown error") , err = true)
+        platform.posix.exit(ERR_INTERNAL_ERROR)
     }
 }
 

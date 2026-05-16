@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="oci-fetch-js-0.0.1-integration">
+    <output-path>$PROJECT_DIR$/build/libs</output-path>
+    <root id="archive" name="oci-fetch-js-0.0.1-integration.jar">
+      <element id="module-output" name="oci-fetch.jsMain" />
+    </root>
+  </artifact>
+</component>

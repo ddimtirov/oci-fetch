@@ -15,53 +15,38 @@ import kotlinx.coroutines.sync.withLock
  */
 class CredentialsStore {
     private val mutex = Mutex()
-    private val tokens = mutableMapOf<String, Entry>()
+    private val tokens = mutableMapOf<String, String>()
 
     /**
-     * Returns a cached token for the given [tokenUrl], or calls [fetch] to obtain one
+     * Returns a cached token for the given [tokenUrl], or calls [fetch] to get a new one
      * if no valid cached entry exists. Concurrent callers requesting the same [tokenUrl]
      * are serialized so that [fetch] is invoked at most once per key.
      */
+    @Suppress("ReturnCount")
     suspend fun get(tokenUrl: String, fetch: suspend (String) -> String): String {
-        mutex.withLock {
-            tokens[tokenUrl]?.token?.let { return it }
-        }
+        // First check if token exists (without acquiring lock)
+        mutex.withLock { tokens[tokenUrl]?.let { return it } }
 
-        // Acquire per-key lock to prevent races on the same challenge
-        val keyMutex = mutex.withLock {
+        // Acquire global lock to prevent races on the same challenge
+        return mutex.withLock {
             // Double-check after acquiring the global lock
-            tokens[tokenUrl]?.token?.let { return it }
-            tokens.getOrPut(tokenUrl) { Entry(keyMutex = Mutex()) }
-        }.keyMutex
+            tokens[tokenUrl]?.let { return it }
 
-        return keyMutex.withLock {
-            // Check again — another coroutine may have populated while we waited
-            mutex.withLock { tokens[tokenUrl] }
-                ?.token
-                ?.let { return it }
-
-            fetch(tokenUrl).also { token ->
-                mutex.withLock {
-                    tokens[tokenUrl] = Entry(token = token, keyMutex = keyMutex)
-                }
-            }
+            // Fetch the token
+            val token = fetch(tokenUrl)
+            tokens[tokenUrl] = token
+            token
         }
     }
 
     /** Removes the cached token for the given [tokenUrl], if any. */
-    suspend fun invalidate(tokenUrl: String) {
-        mutex.withLock { tokens.remove(tokenUrl) }
-    }
+    suspend fun invalidate(tokenUrl: String) = mutex.withLock { tokens.remove(tokenUrl) }
 
     /** Removes all cached tokens. */
-    suspend fun invalidateAll() {
-        mutex.withLock { tokens.clear() }
-    }
+    suspend fun invalidateAll() = mutex.withLock { tokens.clear() }
 
     /** Returns the number of cached entries (mainly for testing). */
-    suspend fun size(): Int = mutex.withLock { tokens.count { it.value.token != null } }
-
-    private class Entry(val token: String? = null, val keyMutex: Mutex = Mutex())
+    suspend fun size(): Int = mutex.withLock { tokens.size }
 
     companion object {
         /** Global shared credentials store instance. */

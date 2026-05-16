@@ -7,7 +7,7 @@ clikt = "5.+"
 logback = "1.+"
 junit = "6.+"
 kotlincrypto-hash = "0.+"
-detekt = "1.23.8"
+detekt = "2.0.0-alpha.3"
 
 [libraries]
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
@@ -27,4 +27,4 @@ kotlincrypto-hash-sha2 = { module = "org.kotlincrypto.hash:sha2", version.ref = 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
