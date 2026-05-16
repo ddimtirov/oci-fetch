@@ -18,15 +18,15 @@ jobs:
     name: Build KMP Library & Linux Binary
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Install libcurl development headers
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
@@ -39,14 +39,14 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-linux
           path: build/reports/tests/
 
       - name: Publish test results
         if: always()
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         with:
           report_paths: build/test-results/**/TEST-*.xml
           check_name: Test Results (Linux)
@@ -54,57 +54,57 @@ jobs:
           include_passed: true
 
       - name: Upload metadata artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oci-fetch-metadata
           path: build/libs/*metadata*.jar
 
       - name: Attest metadata artifact
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/libs/*metadata*.jar
 
       - name: Upload JVM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oci-fetch-jvm
           path: build/libs/*jvm*.jar
 
       - name: Attest JVM artifact
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/libs/*jvm*.jar
 
       - name: Upload JS klib
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oci-fetch-js
           path: build/libs/*js*.klib
 
       - name: Attest JS klib
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/libs/*js*.klib
 
       - name: Upload WASM-JS klib
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oci-fetch-wasm-js
           path: build/libs/*wasm-js*.klib
 
       - name: Attest WASM-JS klib
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/libs/*wasm-js*.klib
 
       - name: Upload Linux binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oci-fetch-linux-x64
           path: build/bin/linuxX64/releaseExecutable/
 
       - name: Attest Linux binary
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/bin/linuxX64/releaseExecutable/*
 
@@ -112,15 +112,15 @@ jobs:
     name: Build Windows Binary
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Install libcurl via vcpkg
         run: |
@@ -135,14 +135,14 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-windows
           path: build/reports/tests/
 
       - name: Publish test results
         if: always()
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         with:
           report_paths: build/test-results/**/TEST-*.xml
           check_name: Test Results (Windows)
@@ -150,12 +150,12 @@ jobs:
           include_passed: true
 
       - name: Upload Windows binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oci-fetch-windows-x64
           path: build/bin/mingwX64/releaseExecutable/
 
       - name: Attest Windows binary
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/bin/mingwX64/releaseExecutable/*
