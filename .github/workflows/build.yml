@@ -53,6 +53,17 @@ jobs:
           detailed_summary: true
           include_passed: true
 
+      - name: Upload metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-fetch-metadata
+          path: build/libs/*metadata*.jar
+
+      - name: Attest metadata artifact
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/libs/*metadata*.jar
+
       - name: Upload JVM artifact
         uses: actions/upload-artifact@v4
         with:
@@ -64,27 +75,27 @@ jobs:
         with:
           subject-path: build/libs/*jvm*.jar
 
-      - name: Upload JS artifact
+      - name: Upload JS klib
         uses: actions/upload-artifact@v4
         with:
           name: oci-fetch-js
-          path: build/compileSync/js/main/productionExecutable/
+          path: build/libs/*js*.klib
 
-      - name: Attest JS artifact
+      - name: Attest JS klib
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: build/compileSync/js/main/productionExecutable/*
+          subject-path: build/libs/*js*.klib
 
-      - name: Upload WASM-JS artifact
+      - name: Upload WASM-JS klib
         uses: actions/upload-artifact@v4
         with:
           name: oci-fetch-wasm-js
-          path: build/compileSync/wasmJs/main/productionExecutable/
+          path: build/libs/*wasm-js*.klib
 
-      - name: Attest WASM-JS artifact
+      - name: Attest WASM-JS klib
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: build/compileSync/wasmJs/main/productionExecutable/*
+          subject-path: build/libs/*wasm-js*.klib
 
       - name: Upload Linux binary
         uses: actions/upload-artifact@v4

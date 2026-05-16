@@ -29,11 +29,13 @@ kotlin {
     js {
         browser()
         nodejs()
+        binaries.library()
     }
     @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
     wasmJs {
         browser()
         nodejs()
+        binaries.library()
     }
     linuxX64() {
         binaries.executable {
