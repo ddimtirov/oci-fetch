@@ -7,6 +7,11 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+
 jobs:
   build-linux:
     name: Build KMP Library & Linux Binary
@@ -37,11 +42,21 @@ jobs:
           name: oci-fetch-jvm
           path: build/libs/*jvm*.jar
 
+      - name: Attest JVM artifact
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/libs/*jvm*.jar
+
       - name: Upload JS artifact
         uses: actions/upload-artifact@v4
         with:
           name: oci-fetch-js
           path: build/compileSync/js/main/productionExecutable/
+
+      - name: Attest JS artifact
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/compileSync/js/main/productionExecutable/*
 
       - name: Upload WASM-JS artifact
         uses: actions/upload-artifact@v4
@@ -49,11 +64,21 @@ jobs:
           name: oci-fetch-wasm-js
           path: build/compileSync/wasmJs/main/productionExecutable/
 
+      - name: Attest WASM-JS artifact
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/compileSync/wasmJs/main/productionExecutable/*
+
       - name: Upload Linux binary
         uses: actions/upload-artifact@v4
         with:
           name: oci-fetch-linux-x64
           path: build/bin/linuxX64/releaseExecutable/
+
+      - name: Attest Linux binary
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/bin/linuxX64/releaseExecutable/*
 
   build-windows:
     name: Build Windows Binary
@@ -85,3 +110,8 @@ jobs:
         with:
           name: oci-fetch-windows-x64
           path: build/bin/mingwX64/releaseExecutable/
+
+      - name: Attest Windows binary
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/bin/mingwX64/releaseExecutable/*
