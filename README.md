@@ -1,3 +1,8 @@
+> This is a pet project for exploring ideas — unsupported and not intended for production use.
+> Consider [Skopeo](https://skopeo.org/), [ORAS](https://oras.land/), or [Regclient](https://regclient.org/) instead.
+>
+> **You've been warned.**
+
 # OCI Fetch
 
 A Kotlin Multiplatform library **and** command-line tool for inspecting OCI (Open Container Initiative) container image metadata directly from registries — without pulling images.
