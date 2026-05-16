@@ -108,6 +108,54 @@ jobs:
         with:
           subject-path: build/bin/linuxX64/releaseExecutable/*
 
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          upload-artifact: false
+
+      - name: Enrich SBOM with environment and build toolchain info
+        run: |
+          JAVA_VERSION=$(java -version 2>&1 | head -1)
+          KOTLIN_VERSION=$(./gradlew --quiet kotlinVersion 2>/dev/null || grep -oP 'kotlin\s*=\s*"\K[^"]+' gradle/libs.versions.toml)
+          GRADLE_VERSION=$(./gradlew --version | grep '^Gradle' | awk '{print $2}')
+          OS_INFO=$(uname -a)
+          GCC_VERSION=$(gcc --version 2>/dev/null | head -1 || echo "N/A")
+          CURL_VERSION=$(curl --version 2>/dev/null | head -1 || echo "N/A")
+
+          # Add build environment metadata as a top-level property in the CycloneDX SBOM
+          jq --arg java "$JAVA_VERSION" \
+             --arg kotlin "$KOTLIN_VERSION" \
+             --arg gradle "$GRADLE_VERSION" \
+             --arg os "$OS_INFO" \
+             --arg gcc "$GCC_VERSION" \
+             --arg curl "$CURL_VERSION" \
+             --arg runner "${{ runner.os }}-${{ runner.arch }}" \
+             '.metadata.properties += [
+               {"name": "build:java-version", "value": $java},
+               {"name": "build:kotlin-version", "value": $kotlin},
+               {"name": "build:gradle-version", "value": $gradle},
+               {"name": "build:os", "value": $os},
+               {"name": "build:gcc-version", "value": $gcc},
+               {"name": "build:curl-version", "value": $curl},
+               {"name": "build:runner", "value": $runner}
+             ]' sbom.cdx.json > sbom-enriched.cdx.json
+          mv sbom-enriched.cdx.json sbom.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-linux
+          path: sbom.cdx.json
+
+      - name: Attest SBOM for Linux binary
+        uses: actions/attest@v4
+        with:
+          subject-path: build/bin/linuxX64/releaseExecutable/*
+          sbom-path: sbom.cdx.json
+
   build-windows:
     name: Build Windows Binary
     runs-on: windows-latest
@@ -159,3 +207,51 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: build/bin/mingwX64/releaseExecutable/*
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          upload-artifact: false
+
+      - name: Enrich SBOM with environment and build toolchain info
+        shell: bash
+        run: |
+          JAVA_VERSION=$(java -version 2>&1 | head -1)
+          KOTLIN_VERSION=$(grep -oP 'kotlin\s*=\s*"\K[^"]+' gradle/libs.versions.toml)
+          GRADLE_VERSION=$(./gradlew --version | grep '^Gradle' | awk '{print $2}')
+          OS_INFO=$(uname -a)
+          GCC_VERSION=$(gcc --version 2>/dev/null | head -1 || echo "N/A")
+          CURL_VERSION=$(curl --version 2>/dev/null | head -1 || echo "N/A")
+
+          jq --arg java "$JAVA_VERSION" \
+             --arg kotlin "$KOTLIN_VERSION" \
+             --arg gradle "$GRADLE_VERSION" \
+             --arg os "$OS_INFO" \
+             --arg gcc "$GCC_VERSION" \
+             --arg curl "$CURL_VERSION" \
+             --arg runner "${{ runner.os }}-${{ runner.arch }}" \
+             '.metadata.properties += [
+               {"name": "build:java-version", "value": $java},
+               {"name": "build:kotlin-version", "value": $kotlin},
+               {"name": "build:gradle-version", "value": $gradle},
+               {"name": "build:os", "value": $os},
+               {"name": "build:gcc-version", "value": $gcc},
+               {"name": "build:curl-version", "value": $curl},
+               {"name": "build:runner", "value": $runner}
+             ]' sbom.cdx.json > sbom-enriched.cdx.json
+          mv sbom-enriched.cdx.json sbom.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-windows
+          path: sbom.cdx.json
+
+      - name: Attest SBOM for Windows binary
+        uses: actions/attest@v4
+        with:
+          subject-path: build/bin/mingwX64/releaseExecutable/*
+          sbom-path: sbom.cdx.json
