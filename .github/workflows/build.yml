@@ -10,6 +10,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  checks: write
   attestations: write
 
 jobs:
@@ -35,6 +36,22 @@ jobs:
 
       - name: Run tests
         run: ./gradlew check
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-linux
+          path: build/reports/tests/
+
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: build/test-results/**/TEST-*.xml
+          check_name: Test Results (Linux)
+          detailed_summary: true
+          include_passed: true
 
       - name: Upload JVM artifact
         uses: actions/upload-artifact@v4
@@ -104,6 +121,22 @@ jobs:
 
       - name: Run Windows native tests
         run: ./gradlew mingwX64Test
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-windows
+          path: build/reports/tests/
+
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: build/test-results/**/TEST-*.xml
+          check_name: Test Results (Windows)
+          detailed_summary: true
+          include_passed: true
 
       - name: Upload Windows binary
         uses: actions/upload-artifact@v4
