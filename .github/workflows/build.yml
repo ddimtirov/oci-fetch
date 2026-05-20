@@ -58,7 +58,7 @@ jobs:
           build-scan-terms-of-use-agree: 'yes'
 
       - name: Build and test KMP library
-        run: ./gradlew build
+        run: ./gradlew build allTests
 
       - name: Upload test reports
         if: always()

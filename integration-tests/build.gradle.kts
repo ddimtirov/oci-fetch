@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     id("oci-fetch.locking")
     id("oci-fetch.testing")
+    id("oci-fetch.native-tooling")
 }
 
 repositories {
