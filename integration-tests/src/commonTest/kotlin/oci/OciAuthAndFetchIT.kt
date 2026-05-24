@@ -1,7 +1,7 @@
 package oci
 
-import io.ktor.http.HttpStatusCode
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.test.runTest
 import oci.testing.OciJsonSchemas.manifestOrIndexValidationError
 import kotlin.test.Test
@@ -55,9 +55,7 @@ class OciAuthAndFetchIT {
             $body               
         """.trimIndent()
 
-        if (isDockerHubRateLimited(ref.registry, resp.status, body)) {
-            return@runTest
-        }
+        skipIfDockerHubRateLimited(ref, resp.status, body, requestDescription)
 
         assertEquals(HttpStatusCode.OK, resp.status, "Unexpected HTTP status for $spec\n$requestDescription")
         assertNotNull(body, "Empty body for $spec\n$requestDescription")
@@ -65,12 +63,6 @@ class OciAuthAndFetchIT {
         manifestOrIndexValidationError(body, spec)?.let { validationError ->
             throw AssertionError("$validationError\n$requestDescription")
         }
-    }
-
-    private fun isDockerHubRateLimited(registry: String, status: HttpStatusCode, body: String): Boolean {
-        return registry == "registry-1.docker.io" &&
-            status == HttpStatusCode.TooManyRequests &&
-            body.contains("\"TOOMANYREQUESTS\"")
     }
 
     @Test fun ubi7() = imageTest("registry.access.redhat.com/ubi7/ubi")

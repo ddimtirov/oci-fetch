@@ -68,9 +68,7 @@ class OciClientIT {
         val response = client.requestManifest(ref)
         val body = response.bodyAsText()
 
-        if (isDockerHubRateLimited(ref.registry, response.status, body)) {
-            return@runTest
-        }
+        skipIfDockerHubRateLimited(ref, response.status, body)
 
         assertTrue(response.status.isSuccess(), "Expected successful response")
 
@@ -92,8 +90,8 @@ class OciClientIT {
             val resp = client.requestManifest(ref)
             val body = runCatching { resp.bodyAsText() }.getOrNull()
 
-            if (body != null && isDockerHubRateLimited(ref.registry, resp.status, body)) {
-                continue
+            if (body != null) {
+                skipIfDockerHubRateLimited(ref, resp.status, body)
             }
 
             if (!resp.status.isSuccess()) {
@@ -112,12 +110,6 @@ class OciClientIT {
             assertNotNull(body, "Empty body for $spec")
             manifestOrIndexValidationError(body, spec)?.let { throw AssertionError(it) }
         }
-    }
-
-    private fun isDockerHubRateLimited(registry: String, status: HttpStatusCode, body: String): Boolean {
-        return registry == "registry-1.docker.io" &&
-            status == HttpStatusCode.TooManyRequests &&
-            body.contains("\"TOOMANYREQUESTS\"")
     }
 
     @Test
