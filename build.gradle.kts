@@ -95,6 +95,7 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.clikt)
             implementation(libs.kotlincrypto.hash.sha2)
+            implementation(libs.json.schema.validator)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
