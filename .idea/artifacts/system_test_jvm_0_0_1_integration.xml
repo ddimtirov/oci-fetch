@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="system-test-jvm-0.0.1-integration">
+    <output-path>$PROJECT_DIR$/system-test/build/libs</output-path>
+    <root id="archive" name="system-test-jvm-0.0.1-integration.jar">
+      <element id="module-output" name="oci-fetch.system-test.jvmMain" />
+    </root>
+  </artifact>
+</component>

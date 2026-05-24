@@ -3,6 +3,7 @@ val resolveAndLockAll = tasks.register("resolveAndLockAll") {
     group = "help"
     description = "Resolves and locks all resolvable configurations."
     notCompatibleWithConfigurationCache("Filters configurations at execution time")
+    dependsOn(tasks.matching { it.name == "kotlinUpgradeYarnLock" })
 
     doFirst {
         require(gradle.startParameter.isWriteDependencyLocks) {
@@ -14,11 +15,5 @@ val resolveAndLockAll = tasks.register("resolveAndLockAll") {
         configurations
             .filter { it.isCanBeResolved }
             .forEach { it.resolve() }
-    }
-}
-
-plugins.withId("org.jetbrains.kotlin.multiplatform") {
-    resolveAndLockAll {
-        dependsOn(tasks.named("kotlinUpgradeYarnLock"))
     }
 }

@@ -13,6 +13,9 @@ repositories {
 
 kotlin {
     jvmToolchain(25)
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
     jvm()
     js {
         nodejs {
@@ -25,13 +28,7 @@ kotlin {
     }
     @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
     wasmJs {
-        nodejs {
-            testTask {
-                useMocha {
-                    timeout = "2m"
-                }
-            }
-        }
+        nodejs()
     }
     linuxX64()
     mingwX64()
