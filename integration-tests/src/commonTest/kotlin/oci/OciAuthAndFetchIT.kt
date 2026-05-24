@@ -3,14 +3,11 @@ package oci
 import io.ktor.http.HttpStatusCode
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import oci.testing.OciJsonSchemas.manifestOrIndexValidationError
 import kotlin.test.Test
 import kotlin.jvm.JvmStatic
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
 
 class OciAuthAndFetchIT {
 
@@ -65,11 +62,9 @@ class OciAuthAndFetchIT {
         assertEquals(HttpStatusCode.OK, resp.status, "Unexpected HTTP status for $spec\n$requestDescription")
         assertNotNull(body, "Empty body for $spec\n$requestDescription")
 
-        // Basic sanity: parse JSON and check schemaVersion exists and is 2 (typical)
-        val json = Json.parseToJsonElement(body).jsonObject
-        val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
-        assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec\n$requestDescription")
-        assertTrue(schemaVersion == 1 || schemaVersion == 2, "Unexpected schemaVersion=$schemaVersion for $spec\n$requestDescription")
+        manifestOrIndexValidationError(body, spec)?.let { validationError ->
+            throw AssertionError("$validationError\n$requestDescription")
+        }
     }
 
     private fun isDockerHubRateLimited(registry: String, status: HttpStatusCode, body: String): Boolean {

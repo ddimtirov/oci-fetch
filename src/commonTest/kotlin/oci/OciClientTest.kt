@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import oci.testing.OciJsonSchemas
 import org.kotlincrypto.hash.sha2.SHA256
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -189,8 +190,8 @@ class OciClientTest {
 
     @Test
     fun apiReturnsBody_whenServerFiltered() = runTest {
-        val responseJson = """{"schemaVersion":2,"manifests":[{"digest":"sha256:s","artifactType":"application/sig"}]}"""
-        val expectedJson = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"sha256:s","artifactType":"application/sig"}]}"""
+        val responseJson = """{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"artifactType":"application/sig"}]}"""
+        val expectedJson = """{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"artifactType":"application/sig"}]}"""
 
         OciClient(mockClient { req ->
             assertTrue(req.url.encodedPath.endsWith("/v2/library/alpine/referrers/$SUBJECT_DIGEST"))
@@ -206,14 +207,15 @@ class OciClientTest {
         }).use { client ->
             val result = client.fetchReferrers(DIGEST_IMAGE, "application/sig")
             assertEquals(Json.parseToJsonElement(expectedJson).jsonObject, result)
+            assertValidImageIndex(result, "apiReturnsBody_whenServerFiltered")
         }
     }
 
     @Test
     fun apiResponseFilteredLocally_whenHeaderMissing() = runTest {
         val responseJson = """{"schemaVersion":2,"manifests":[
-            {"digest":"sha256:a","artifactType":"application/sig"},
-            {"digest":"sha256:b","artifactType":"application/sbom"}
+            {"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"artifactType":"application/sig"},
+            {"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":2,"artifactType":"application/sbom"}
         ]}"""
 
         OciClient(mockClient { _ ->
@@ -227,13 +229,14 @@ class OciClientTest {
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals("application/sig", manifests[0].jsonObject["artifactType"]?.jsonPrimitive?.content)
+            assertValidImageIndex(parsed, "apiResponseFilteredLocally_whenHeaderMissing")
         }
     }
 
     @Test
     fun referrersApiPaginatesMergesManifests() = runTest {
-        val page1 = """{"schemaVersion":2,"manifests":[{"digest":"sha256:a","artifactType":"application/sig"}]}"""
-        val page2 = """{"schemaVersion":2,"manifests":[{"digest":"sha256:b","artifactType":"application/sbom"}]}"""
+        val page1 = """{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"artifactType":"application/sig"}]}"""
+        val page2 = """{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":2,"artifactType":"application/sbom"}]}"""
 
         OciClient(mockClient { req ->
             val path = req.url.encodedPath
@@ -258,8 +261,9 @@ class OciClientTest {
             val result = client.fetchReferrers(DIGEST_IMAGE)
             val manifests = result["manifests"]!!.jsonArray
             assertEquals(2, manifests.size)
-            assertEquals("sha256:a", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
-            assertEquals("sha256:b", manifests[1].jsonObject["digest"]?.jsonPrimitive?.content)
+            assertEquals("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
+            assertEquals("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", manifests[1].jsonObject["digest"]?.jsonPrimitive?.content)
+            assertValidImageIndex(result, "referrersApiPaginatesMergesManifests")
         }
     }
 
@@ -286,7 +290,7 @@ class OciClientTest {
 
     @Test
     fun api404FallsBackToTagSchema() = runTest {
-        val tagBody = """{"schemaVersion":2,"manifests":[{"digest":"sha256:x"}]}"""
+        val tagBody = """{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1}]}"""
 
         OciClient(mockClient { req ->
             when {
@@ -305,7 +309,8 @@ class OciClientTest {
             val parsed = client.fetchReferrers(DIGEST_IMAGE)
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
-            assertEquals("sha256:x", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
+            assertEquals("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
+            assertValidImageIndex(parsed, "api404FallsBackToTagSchema")
         }
     }
 
@@ -314,6 +319,7 @@ class OciClientTest {
         OciClient(mockClient { _ -> respond("", HttpStatusCode.NotFound) }).use { client ->
             val parsed = client.fetchReferrers(DIGEST_IMAGE)
             assertEquals(0, parsed["manifests"]!!.jsonArray.size)
+            assertValidImageIndex(parsed, "api404AndTag404ReturnsEmptyIndex")
         }
     }
 
@@ -381,6 +387,7 @@ class OciClientTest {
             assertEquals(1, manifests.size)
             assertEquals("sha256:sig", manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
             assertEquals("application/sig", manifests[0].jsonObject["artifactType"]?.jsonPrimitive?.content)
+            assertValidImageIndex(parsed, "scrapeFiltersByArtifactType")
         }
     }
 
@@ -500,6 +507,7 @@ class OciClientTest {
             val manifests = parsed["manifests"]!!.jsonArray
             assertEquals(1, manifests.size)
             assertEquals(expectedDigest, manifests[0].jsonObject["digest"]?.jsonPrimitive?.content)
+            assertValidImageIndex(parsed, "scrapeUsesSha256FallbackWhenDigestHeaderMissing")
         }
     }
 
@@ -514,4 +522,9 @@ class OciClientTest {
     }
 
     private fun json(string: String): JsonObject = Json.parseToJsonElement(string).jsonObject
+
+    private fun assertValidImageIndex(value: JsonObject, context: String) {
+        val validation = OciJsonSchemas.imageIndex.validate(value)
+        assertTrue(validation.valid, "Expected OCI image index schema validity in $context: ${validation.diagnostics}")
+    }
 }

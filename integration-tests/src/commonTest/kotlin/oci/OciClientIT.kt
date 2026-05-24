@@ -4,10 +4,10 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import oci.testing.OciJsonSchemas.manifestOrIndexValidationError
 import kotlin.test.Test
 import kotlin.jvm.JvmStatic
 import kotlin.test.assertContains
@@ -75,12 +75,8 @@ class OciClientIT {
         assertTrue(response.status.isSuccess(), "Expected successful response")
 
         // Parse and validate manifest structure
-        val body = response.bodyAsText()
         assertNotNull(body)
-        val json = Json.parseToJsonElement(body).jsonObject
-        val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
-        assertNotNull(schemaVersion)
-        assertTrue(schemaVersion == 1 || schemaVersion == 2)
+        manifestOrIndexValidationError(body, null)?.let<String, Nothing> { throw AssertionError(it) }
     }
 
     @Test
@@ -101,7 +97,8 @@ class OciClientIT {
             }
 
             if (!resp.status.isSuccess()) {
-                val headers = resp.headers.entries().joinToString("\n") { entry -> "${entry.key}: ${entry.value.joinToString()}" }
+                val headers =
+                    resp.headers.entries().joinToString("\n") { entry -> "${entry.key}: ${entry.value.joinToString()}" }
                 val msg = buildString {
                     appendLine("Failed for $spec")
                     appendLine("Unexpected status ${resp.status}")
@@ -113,14 +110,10 @@ class OciClientIT {
             }
 
             assertNotNull(body, "Empty body for $spec")
-            val json = Json.parseToJsonElement(body).jsonObject
-            val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
-            assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec")
-            assertTrue(
-                schemaVersion == 1 || schemaVersion == 2,
-                "Unexpected schemaVersion=$schemaVersion for $spec"
-            )
+            manifestOrIndexValidationError(body, spec)?.let { throw AssertionError(it) }
         }
+    }
+
     private fun isDockerHubRateLimited(registry: String, status: HttpStatusCode, body: String): Boolean {
         return registry == "registry-1.docker.io" &&
             status == HttpStatusCode.TooManyRequests &&
@@ -134,6 +127,7 @@ class OciClientIT {
         val resolved = if (image.isDigest) image else client.resolveToImageManifest(image, SELECT_AMD64)
 
         val signatures = client.fetchReferrers(resolved, MIME_NOTARY_SIG)
+        manifestOrIndexValidationError(signatures.toString(), image.toString())?.let<String, Nothing> { throw AssertionError(it) }
 
         assertEquals("application/vnd.oci.image.index.v1+json", signatures["mediaType"]?.jsonPrimitive?.content, "The result is an OCI Index")
 
@@ -150,6 +144,7 @@ class OciClientIT {
             val resolved = client.resolveToImageManifest(image, SELECT_AMD64)
 
             val referrersIndex = client.fetchReferrers(resolved)
+            manifestOrIndexValidationError(referrersIndex.toString(), image.toString())?.let<String, Nothing> { throw AssertionError(it) }
             val referrerManifests = referrersIndex["manifests"]?.jsonArray
             assertNotNull(referrerManifests, "Attached artifact manifests array should be non-empty: $referrersIndex")
 
@@ -175,6 +170,7 @@ class OciClientIT {
             val regex = Regex("^$digestTag(?:\\.(?:sig|att|sbom))?$")
 
             val referrersIndex = client.scrapeReferrers(resolved, regex)
+            manifestOrIndexValidationError(referrersIndex.toString(), image.toString())?.let<String, Nothing> { throw AssertionError(it) }
 
             val manifests = referrersIndex["manifests"]?.jsonArray
             assertNotNull(manifests, "Attached artifact manifests array should be non-empty: $referrersIndex")
