@@ -66,6 +66,11 @@ class OciClientIT {
         val client = getClient()
         val ref = OciRef.parse("registry-1.docker.io/library/alpine:latest")
         val response = client.requestManifest(ref)
+        val body = response.bodyAsText()
+
+        if (isDockerHubRateLimited(ref.registry, response.status, body)) {
+            return@runTest
+        }
 
         assertTrue(response.status.isSuccess(), "Expected successful response")
 
@@ -91,6 +96,10 @@ class OciClientIT {
             val resp = client.requestManifest(ref)
             val body = runCatching { resp.bodyAsText() }.getOrNull()
 
+            if (body != null && isDockerHubRateLimited(ref.registry, resp.status, body)) {
+                continue
+            }
+
             if (!resp.status.isSuccess()) {
                 val headers = resp.headers.entries().joinToString("\n") { entry -> "${entry.key}: ${entry.value.joinToString()}" }
                 val msg = buildString {
@@ -112,6 +121,10 @@ class OciClientIT {
                 "Unexpected schemaVersion=$schemaVersion for $spec"
             )
         }
+    private fun isDockerHubRateLimited(registry: String, status: HttpStatusCode, body: String): Boolean {
+        return registry == "registry-1.docker.io" &&
+            status == HttpStatusCode.TooManyRequests &&
+            body.contains("\"TOOMANYREQUESTS\"")
     }
 
     @Test

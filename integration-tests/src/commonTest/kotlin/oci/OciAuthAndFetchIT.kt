@@ -58,6 +58,10 @@ class OciAuthAndFetchIT {
             $body               
         """.trimIndent()
 
+        if (isDockerHubRateLimited(ref.registry, resp.status, body)) {
+            return@runTest
+        }
+
         assertEquals(HttpStatusCode.OK, resp.status, "Unexpected HTTP status for $spec\n$requestDescription")
         assertNotNull(body, "Empty body for $spec\n$requestDescription")
 
@@ -66,6 +70,12 @@ class OciAuthAndFetchIT {
         val schemaVersion = json["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull()
         assertNotNull(schemaVersion, "schemaVersion missing in manifest for $spec\n$requestDescription")
         assertTrue(schemaVersion == 1 || schemaVersion == 2, "Unexpected schemaVersion=$schemaVersion for $spec\n$requestDescription")
+    }
+
+    private fun isDockerHubRateLimited(registry: String, status: HttpStatusCode, body: String): Boolean {
+        return registry == "registry-1.docker.io" &&
+            status == HttpStatusCode.TooManyRequests &&
+            body.contains("\"TOOMANYREQUESTS\"")
     }
 
     @Test fun ubi7() = imageTest("registry.access.redhat.com/ubi7/ubi")
