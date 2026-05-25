@@ -14,6 +14,9 @@ data class OciRef(
     fun withDigest(digest: String): OciRef = copy(isDigest = true, reference = digest)
     fun withTag(tag: String): OciRef = copy(isDigest = false, reference = tag)
     fun withReference(reference: String): OciRef = copy(isDigest = reference.contains(':'), reference = reference)
+    override fun toString(): String =
+        if (isDigest) "$registry/$repository@$reference"
+        else "$registry/$repository:$reference"
 
     companion object {
         /**

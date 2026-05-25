@@ -3,3 +3,4 @@ plugins {
 }
 rootProject.name = "oci-fetch"
 include("integration-tests")
+include("system-test")

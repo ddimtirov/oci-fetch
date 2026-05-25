@@ -1,0 +1,22 @@
+{
+  "distSpecVersion": "1.1.0",
+  "storage": {
+    "rootDirectory": "/var/lib/registry"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "tls": {
+      "cert": "/etc/zot/certs/server.crt",
+      "key": "/etc/zot/certs/server.key"
+    }
+  },
+  "log": {
+    "level": "debug"
+  },
+  "extensions": {
+    "search": {
+      "enable": true
+    }
+  }
+}

@@ -9,6 +9,7 @@ junit = "6.+"
 kotlincrypto-hash = "0.+"
 detekt = "2.0.0-alpha.3"
 json-schema-validator = "0.5.4"
+testcontainers = "1.+"
 
 [libraries]
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
@@ -25,6 +26,8 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 kotlincrypto-hash-sha2 = { module = "org.kotlincrypto.hash:sha2", version.ref = "kotlincrypto-hash" }
 json-schema-validator = { module = "io.github.optimumcode:json-schema-validator", version.ref = "json-schema-validator" }
+testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
