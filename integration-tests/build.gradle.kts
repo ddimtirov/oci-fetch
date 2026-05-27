@@ -1,6 +1,5 @@
 plugins {
-    alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.kotlin.serialization)
+    id("oci-fetch.kmp-conventions")
     id("oci-fetch.locking")
     id("oci-fetch.testing")
     id("oci-fetch.native-tooling")
@@ -12,10 +11,6 @@ repositories {
 
 
 kotlin {
-    jvmToolchain(25)
-    compilerOptions {
-        freeCompilerArgs.add("-Xexpect-actual-classes")
-    }
     jvm()
     js {
         nodejs {

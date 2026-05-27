@@ -1,6 +1,5 @@
 plugins {
-    alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.kotlin.serialization)
+    id("oci-fetch.kmp-conventions")
     id("oci-fetch.locking")
     id("oci-fetch.testing")
 }
@@ -10,7 +9,6 @@ repositories {
 }
 
 kotlin {
-    jvmToolchain(25)
     jvm()
 
     sourceSets {
