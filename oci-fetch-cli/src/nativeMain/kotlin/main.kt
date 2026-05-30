@@ -163,7 +163,7 @@ class ReferrersCommand(
                 } else {
                     client.fetchReferrers(digestRef, type)
                 }
-                if (raw) referrers.toString() else formatTsvReferrers(referrers.toString())
+                if (raw) referrers.toString() else formatTsvReferrers(referrers)
             }
             println(output)
         }

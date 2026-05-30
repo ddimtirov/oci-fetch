@@ -90,6 +90,14 @@ fun formatTsvManifest(manifestStr: String): String = buildString {
  */
 fun formatTsvReferrers(indexStr: String): String = buildString {
     val index = Json.parseToJsonElement(indexStr).jsonObject
+    appendReferrersRows(index)
+}.trimEnd()
+
+fun formatTsvReferrers(index: JsonObject): String = buildString {
+    appendReferrersRows(index)
+}.trimEnd()
+
+private fun StringBuilder.appendReferrersRows(index: JsonObject) {
     val manifests = index["manifests"]?.jsonArray
     appendLine("digest\tartifactType\tmediaType\tsize\tannotations")
     manifests?.forEach { entry ->
@@ -105,7 +113,7 @@ fun formatTsvReferrers(indexStr: String): String = buildString {
 
         appendLine("$digest\t$artifactType\t$mediaType\t$size\t$annotations")
     }
-}.trimEnd()
+}
 
 /**
  * Pretty-prints a JSON config.
