@@ -146,10 +146,11 @@ class OciClientTest {
     @Test
     fun testIsOciManifest() {
         OciClient().use { client ->
-            assertTrue(client.isOciImageManifest(json("""{"layer": {}}""")))
+            assertTrue(client.isOciImageManifest(json("""{"layers": []}""")))
             assertTrue(client.isOciImageManifest(json("""{"config": {}}""")))
             assertTrue(client.isOciImageManifest(json("""{"subject": {}}""")))
             assertTrue(client.isOciImageManifest(json("""{"fsLayers": {}}""")))
+            assertFalse(client.isOciImageManifest(json("""{"layer": {}}""")))
             assertFalse(client.isOciImageManifest(json("""{"manifest": {}}""")))
         }
     }

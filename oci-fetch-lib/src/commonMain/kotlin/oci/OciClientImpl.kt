@@ -197,7 +197,7 @@ internal class OciClientImpl(private val client: HttpClient, val externallyManag
     }
 
     override fun isOciImageManifest(json: JsonObject?): Boolean =
-        listOf("layer", "config", "subject", "fsLayers").any { json?.containsKey(it) ?: false }
+        listOf("layers", "config", "subject", "fsLayers").any { json?.containsKey(it) ?: false }
 
     private fun JsonObject.rethrowErrors(): JsonObject {
         val errors = jsonObject["errors"]?.jsonArray ?: emptyList()
