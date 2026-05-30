@@ -28,6 +28,7 @@ internal fun HttpClientConfig<*>.installOciBearerTokenAuth(
                 checkNotNull(wwwAuthenticateHeader) { "WWW-Authenticate header is missing" }
 
                 val tokenUrl = bearerTokenUrl(wwwAuthenticateHeader)
+                credentialsStore.invalidate(tokenUrl)
                 val token = credentialsStore.get(tokenUrl) { url ->
                     val tokenResponse = client.get(url) {
                         markAsRefreshTokenRequest()
