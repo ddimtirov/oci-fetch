@@ -5,30 +5,13 @@ import kotlinx.serialization.json.*
 /**
  * A selector for OCI platforms.
  */
-@kotlin.jvm.JvmInline
-value class PlatformSelector(private val data: SelectorData = SelectorData()) {
-    data class SelectorData(
-        val architecture: String? = null,
-        val os: String? = null,
-        val osVersion: String? = null,
-        val osFeatures: List<String> = emptyList(),
-        val variant: String? = null
-    )
-
-    constructor(
-        architecture: String? = null,
-        os: String? = null,
-        osVersion: String? = null,
-        osFeatures: List<String> = emptyList(),
-        variant: String? = null
-    ) : this(SelectorData(architecture, os, osVersion, osFeatures, variant))
-
-    val architecture: String? get() = data.architecture
-    val os: String? get() = data.os
-    val osVersion: String? get() = data.osVersion
-    val osFeatures: List<String> get() = data.osFeatures
-    val variant: String? get() = data.variant
-
+data class PlatformSelector(
+    val architecture: String? = null,
+    val os: String? = null,
+    val osVersion: String? = null,
+    val osFeatures: List<String> = emptyList(),
+    val variant: String? = null
+) {
     /**
      * Returns true if this selector matches the given platform JSON object.
      */
