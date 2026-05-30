@@ -24,10 +24,7 @@ class OciFetch : CliktCommand(name = "oci-fetch") {
     val raw by option("--raw", help = "Return raw JSON response").flag()
 
     override fun run() {
-        if (currentContext.invokedSubcommand == null) {
-            echo(getFormattedHelp())
-            platform.posix.exit(0)
-        }
+        showHelpIfNoSubcommand()
     }
 }
 
@@ -53,10 +50,7 @@ class MetaCommand : CliktCommand(name = "meta") {
         )
 
     override fun run() {
-        if (currentContext.invokedSubcommand == null) {
-            echo(getFormattedHelp())
-            platform.posix.exit(0)
-        }
+        showHelpIfNoSubcommand()
     }
 }
 
@@ -346,10 +340,14 @@ fun readStdin(): String = buildString {
 class ParseCommand : CliktCommand(name = "parse") {
     override fun help(context: Context): String = "Parse and pretty-print OCI objects from stdin"
     override fun run() {
-        if (currentContext.invokedSubcommand == null) {
-            echo(getFormattedHelp())
-            platform.posix.exit(0)
-        }
+        showHelpIfNoSubcommand()
+    }
+}
+
+private fun CliktCommand.showHelpIfNoSubcommand() {
+    if (currentContext.invokedSubcommand == null) {
+        echo(getFormattedHelp())
+        platform.posix.exit(0)
     }
 }
 
