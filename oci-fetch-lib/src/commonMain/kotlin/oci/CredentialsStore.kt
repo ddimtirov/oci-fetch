@@ -14,6 +14,10 @@ import kotlinx.coroutines.sync.withLock
  * accepts a suspend factory that could be backed by a persistent cache.
  */
 class CredentialsStore {
+    // CONSCIOUS DESIGN DECISION:
+    // We use a single global mutex to keep this rare operation simple and robust,
+    // sacrificing fine-grained lock efficiency in favor of preventing concurrent
+    // duplicate fetches safely.
     private val mutex = Mutex()
     private val tokens = mutableMapOf<String, String>()
 
