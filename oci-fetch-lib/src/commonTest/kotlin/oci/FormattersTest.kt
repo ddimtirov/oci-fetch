@@ -90,4 +90,18 @@ class FormattersTest {
                 "sha256:1\t\tapplication/vnd.oci.image.manifest.v1+json\t10\tk1=v1; k2=v2"
         assertEquals(expected, actual)
     }
+
+    @Test
+    fun testFormatPrettyJson_object() {
+        val json = """{"a":1,"b":"hello"}"""
+        val pretty = formatPrettyJson(json)
+        assertEquals("{\n    \"a\": 1,\n    \"b\": \"hello\"\n}", pretty)
+    }
+
+    @Test
+    fun testFormatPrettyJson_array() {
+        val json = """[1,2,3]"""
+        val pretty = formatPrettyJson(json)
+        assertEquals("[\n    1,\n    2,\n    3\n]", pretty)
+    }
 }

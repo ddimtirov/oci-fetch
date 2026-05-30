@@ -110,8 +110,11 @@ fun formatTsvReferrers(indexStr: String): String = buildString {
 /**
  * Pretty-prints a JSON config.
  */
-fun formatPrettyJson(config: JsonObject): String =
+fun formatPrettyJson(config: JsonElement): String =
     prettyJson.encodeToString(JsonElement.serializer(), config)
 
+fun formatPrettyJson(config: JsonObject): String =
+    formatPrettyJson(config as JsonElement)
+
 fun formatPrettyJson(config: String): String =
-    formatPrettyJson(Json.parseToJsonElement(config).jsonObject)
+    formatPrettyJson(Json.parseToJsonElement(config))
