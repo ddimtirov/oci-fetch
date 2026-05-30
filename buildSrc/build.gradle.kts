@@ -10,9 +10,8 @@ repositories {
 dependencies {
     implementation(plugin(libs.plugins.kotlin.multiplatform))
     implementation(plugin(libs.plugins.kotlin.serialization))
+    implementation(plugin(libs.plugins.detekt))
 }
 
-fun org.gradle.kotlin.dsl.DependencyHandlerScope.plugin(
-    plugin: org.gradle.api.provider.Provider<org.gradle.plugin.use.PluginDependency>
-): org.gradle.api.provider.Provider<String> =
+fun plugin(plugin: Provider<PluginDependency>): Provider<String> =
     plugin.map { "${it.pluginId}:${it.pluginId}.gradle.plugin:${it.version}" }

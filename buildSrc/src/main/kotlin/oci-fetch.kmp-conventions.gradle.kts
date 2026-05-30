@@ -1,35 +1,54 @@
-import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
-import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCacheApi
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
-
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("dev.detekt")
 }
 
-extensions.configure<KotlinMultiplatformExtension>("kotlin") {
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain{
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension>("kotlin") {
     jvmToolchain(25)
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
-    targets.all {
-        compilations.all {
-            compileTaskProvider.configure {
-                compilerOptions {
-                    freeCompilerArgs.add("-Xexpect-actual-classes")
-                }
-            }
-        }
+}
+
+extensions.configure<dev.detekt.gradle.extensions.DetektExtension>("detekt") {
+    buildUponDefaultConfig = true
+    config.setFrom(rootProject.layout.files("detekt.yml"))
+    basePath = layout.buildDirectory.dir("reports/detekt")
+}
+
+tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
+    reports {
+        sarif.required = true
+        html.required = true
     }
-    // FIXME: Remove when Clikt fixes the issue. See https://kotl.in/disable-native-cache
-    targets.withType(KotlinNativeTarget::class.java).matching { it.name == "linuxX64" }.configureEach {
-        @OptIn(KotlinNativeCacheApi::class)
-        binaries.all {
-            disableNativeCache(
-                version = DisableCacheInKotlinVersion.`2_4_0`,
-                reason = "Workaround for Clikt 5.x duplicate symbol linker error (selfAndAncestors)."
-            )
-        }
+}
+
+tasks.register<Exec>("linuxX64TestInWSL") {
+    group = "verification"
+    description = "Runs Linux native tests via WSL (default distribution)"
+    dependsOn("linuxX64Test")
+
+    val testExecutable = layout.buildDirectory
+        .file("bin/linuxX64/debugTest/test.kexe")
+        .get().asFile.absolutePath
+        .replace("\\", "/")
+
+    commandLine("wsl", "bash", "-c", "\"$(wslpath $testExecutable)\"")
+}
+
+tasks.matching { it.name.lowercase().matches(Regex("^linuxx64.*|.*linuxx64$")) }.configureEach {
+    onlyIf("KTOR-3965 ktor-client-curl has linking issues for cross-compilation") {
+        !System.getProperty("os.name").lowercase().contains("windows")
     }
 }

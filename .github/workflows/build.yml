@@ -65,114 +65,101 @@ jobs:
       - name: Build and test KMP library
         run: ./gradlew build allTests
 
-      - name: Publish test results
-        if: always()
-        uses: mikepenz/action-junit-report@v6
-        with:
-          report_paths: build/test-results/**/TEST-*.xml
-          check_name: Test Results (Linux)
-          detailed_summary: true
-
-      - name: Upload Detekt SARIF to GitHub Code Scanning
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: build/reports/detekt/detekt.sarif
-          category: detekt
-
-      - name: Upload metadata artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: oci-fetch-metadata
-          path: build/libs/*metadata*.jar
-
-      - name: Upload JVM artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: oci-fetch-jvm
-          path: build/libs/*jvm*.jar
-
-      - name: Upload JS klib
-        uses: actions/upload-artifact@v7
-        with:
-          name: oci-fetch-js
-          path: build/libs/*js*.klib
-
-      - name: Upload WASM-JS klib
-        uses: actions/upload-artifact@v7
-        with:
-          name: oci-fetch-wasm-js
-          path: build/libs/*wasm-js*.klib
-
-      - name: Attest libraries and metadata JAR together (SLSA provenance)
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            build/libs/*metadata*.jar
-            build/libs/*jvm*.jar
-            build/libs/*js*.klib
-            build/libs/*wasm-js*.klib
-
-      - name: Upload Linux binary
-        uses: actions/upload-artifact@v7
-        with:
-          name: oci-fetch-linux-x64
-          path: build/bin/linuxX64/releaseExecutable/
-
-      - name: Attest Linux binary (SLSA provenance)
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: build/bin/linuxX64/releaseExecutable/*
-
-      - name: Generate SBOM
+      - name: Generate Anchore (external) SBOM
         uses: anchore/sbom-action@v0
         with:
           path: .
           format: cyclonedx-json
-          output-file: sbom.cdx.json
+          output-file: anchore.linux64.cdx.json
           upload-artifact: false
 
-      - name: Enrich SBOM with environment and build toolchain info
+      - name: Munge external SBOM with environment and build toolchain info and layout the others
         run: |
           JAVA_VERSION=$(java -version 2>&1 | head -1)
-          KOTLIN_VERSION=$(grep -oP 'kotlin\s*=\s*"\K[^"]+' gradle/libs.versions.toml)
+          KOTLIN_VERSION=$(./gradlew --quiet kotlinVersion 2>/dev/null || grep -oP 'kotlin\s*=\s*"\K[^"]+' gradle/libs.versions.toml)
           GRADLE_VERSION=$(./gradlew --version | grep '^Gradle' | awk '{print $2}')
-          IMAGE_OS="${ImageOS:-unknown}"
-          IMAGE_VERSION="${ImageVersion:-unknown}"
-          LIBCURL_DEV_VERSION=$(dpkg-query -W -f='${Version}' libcurl4-openssl-dev 2>/dev/null || echo "not-installed")
-          LIBUNISTRING_DEV_VERSION=$(dpkg-query -W -f='${Version}' libunistring-dev 2>/dev/null || echo "not-installed")
+          OS_INFO=$(uname -a)
+          GCC_VERSION=$(gcc --version 2>/dev/null | head -1 || echo "N/A")
+          CURL_VERSION=$(curl --version 2>/dev/null | head -1 || echo "N/A")
 
-          # Add selected build metadata to the CycloneDX SBOM:
-          # toolchains, base image identity, and libraries installed on top of the base image.
+          # Add build environment metadata as a top-level property in the CycloneDX SBOM
           jq --arg java "$JAVA_VERSION" \
              --arg kotlin "$KOTLIN_VERSION" \
              --arg gradle "$GRADLE_VERSION" \
-             --arg image_os "$IMAGE_OS" \
-             --arg image_version "$IMAGE_VERSION" \
-             --arg libcurl_dev "$LIBCURL_DEV_VERSION" \
-             --arg libunistring_dev "$LIBUNISTRING_DEV_VERSION" \
+             --arg os "$OS_INFO" \
+             --arg gcc "$GCC_VERSION" \
+             --arg curl "$CURL_VERSION" \
+             --arg runner "${{ runner.os }}-${{ runner.arch }}" \
              '.metadata.properties += [
                {"name": "build:java-version", "value": $java},
                {"name": "build:kotlin-version", "value": $kotlin},
                {"name": "build:gradle-version", "value": $gradle},
-               {"name": "build:base-image-os", "value": $image_os},
-               {"name": "build:base-image-version", "value": $image_version},
-               {"name": "build:installed-libcurl4-openssl-dev", "value": $libcurl_dev},
-               {"name": "build:installed-libunistring-dev", "value": $libunistring_dev}
-             ]' sbom.cdx.json > sbom-enriched.cdx.json
-          mv sbom-enriched.cdx.json sbom.cdx.json
+               {"name": "build:os", "value": $os},
+               {"name": "build:gcc-version", "value": $gcc},
+               {"name": "build:curl-version", "value": $curl},
+               {"name": "build:runner", "value": $runner}
+             ]' anchore.linux64.cdx.json > sbom-enriched.cdx.json
+          mv sbom-enriched.cdx.json anchore.linux64.cdx.json
 
-      - name: Upload SBOM
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: "**/build/test-results/**/TEST-*.xml"
+          check_name: Test Results (Linux)
+          detailed_summary: true
+
+      - name: Publish Detekt SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: oci-fetch-lib/build/reports/detekt/detekt.sarif
+          category: detekt-lib
+
+      - name: Publish Detekt SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: oci-fetch-cli/build/reports/detekt/detekt.sarif
+          category: detekt-cli
+
+      - name: Upload browsable reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: sbom-linux
-          path: sbom.cdx.json
+          name: reports-linux
+          path: "**/build/reports/"
 
-      - name: Attest SBOM for Linux binary
+      - name: Upload SBOMs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sboms-linux
+          path: "*.cdx.json"
+
+      - name: Upload libraries
+        uses: actions/upload-artifact@v7
+        with:
+          name: oci-fetch-lib-kmp
+          path: oci-fetch-lib/build/libs/*
+
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: oci-fetch-cli-linux64
+          path: oci-fetch-cli/build/bin/linuxX64/releaseExecutable/*
+
+      - name: Attest libraries
         uses: actions/attest@v4
         with:
-          subject-path: build/bin/linuxX64/releaseExecutable/*
-          sbom-path: sbom.cdx.json
+          sbom-path: anchore.linux64.cdx.json
+          subject-path: oci-fetch-lib/build/libs/*
+
+      - name: Attest Linux binary
+        uses: actions/attest@v4
+        with:
+          sbom-path: anchore.linux64.cdx.json
+          subject-path: oci-fetch-cli/build/bin/linuxX64/releaseExecutable/*
 
   build-windows:
     name: Build Windows Binary
@@ -202,70 +189,72 @@ jobs:
       - name: Build and test Windows binary
         run: ./gradlew mingwX64Binaries mingwX64Test
 
-      - name: Publish test results
-        if: always()
-        uses: mikepenz/action-junit-report@v6
-        with:
-          report_paths: build/test-results/**/TEST-*.xml
-          check_name: Test Results (Windows)
-          detailed_summary: true
-
-      - name: Upload Windows binary
-        uses: actions/upload-artifact@v7
-        with:
-          name: oci-fetch-windows-x64
-          path: build/bin/mingwX64/releaseExecutable/
-
-      - name: Attest Windows binary (SLSA provenance)
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: build/bin/mingwX64/releaseExecutable/*
-
-      - name: Generate SBOM
+      - name: Generate Anchore SBOM
         uses: anchore/sbom-action@v0
         with:
           path: .
           format: cyclonedx-json
-          output-file: sbom.cdx.json
+          output-file: anchore.windows64.cdx.json
           upload-artifact: false
 
-      - name: Enrich SBOM with environment and build toolchain info
+      - name: Munge external SBOM with environment and build toolchain info and layout the others
         shell: bash
         run: |
           JAVA_VERSION=$(java -version 2>&1 | head -1)
           KOTLIN_VERSION=$(grep -oP 'kotlin\s*=\s*"\K[^"]+' gradle/libs.versions.toml)
           GRADLE_VERSION=$(./gradlew --version | grep '^Gradle' | awk '{print $2}')
-          IMAGE_OS="${ImageOS:-unknown}"
-          IMAGE_VERSION="${ImageVersion:-unknown}"
-          VCPKG_CURL_VERSION=$(vcpkg list | grep -E '^curl:x64-windows[[:space:]]' | awk '{print $2}' | head -1 || true)
-          if [ -z "$VCPKG_CURL_VERSION" ]; then
-            VCPKG_CURL_VERSION="not-installed"
-          fi
+          OS_INFO=$(uname -a)
+          GCC_VERSION=$(gcc --version 2>/dev/null | head -1 || echo "N/A")
+          CURL_VERSION=$(curl --version 2>/dev/null | head -1 || echo "N/A")
 
           jq --arg java "$JAVA_VERSION" \
              --arg kotlin "$KOTLIN_VERSION" \
              --arg gradle "$GRADLE_VERSION" \
-             --arg image_os "$IMAGE_OS" \
-             --arg image_version "$IMAGE_VERSION" \
-             --arg vcpkg_curl "$VCPKG_CURL_VERSION" \
+             --arg os "$OS_INFO" \
+             --arg gcc "$GCC_VERSION" \
+             --arg curl "$CURL_VERSION" \
+             --arg runner "${{ runner.os }}-${{ runner.arch }}" \
              '.metadata.properties += [
                {"name": "build:java-version", "value": $java},
                {"name": "build:kotlin-version", "value": $kotlin},
                {"name": "build:gradle-version", "value": $gradle},
-               {"name": "build:base-image-os", "value": $image_os},
-               {"name": "build:base-image-version", "value": $image_version},
-               {"name": "build:installed-vcpkg-curl-x64-windows", "value": $vcpkg_curl}
-             ]' sbom.cdx.json > sbom-enriched.cdx.json
-          mv sbom-enriched.cdx.json sbom.cdx.json
+               {"name": "build:os", "value": $os},
+               {"name": "build:gcc-version", "value": $gcc},
+               {"name": "build:curl-version", "value": $curl},
+               {"name": "build:runner", "value": $runner}
+             ]' anchore.windows64.cdx.json > sbom-enriched.cdx.json
+          mv sbom-enriched.cdx.json anchore.windows64.cdx.json
 
-      - name: Upload SBOM
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: "**/build/test-results/**/TEST-*.xml"
+          check_name: Test Results (Windows)
+          detailed_summary: true
+
+      - name: Upload browsable reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: sbom-windows
-          path: sbom.cdx.json
+          name: reports-windows
+          path: "**/build/reports/"
 
-      - name: Attest SBOM for Windows binary
+      - name: Upload SBOMs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sboms-windows
+          path: "*.cdx.json"
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: oci-fetch-cli-windows64
+          path: oci-fetch-cli/build/bin/mingwX64/releaseExecutable/*
+
+      - name: Attest Windows binary
         uses: actions/attest@v4
         with:
-          subject-path: build/bin/mingwX64/releaseExecutable/*
-          sbom-path: sbom.cdx.json
+          sbom-path: anchore.windows64.cdx.json
+          subject-path: oci-fetch-cli/build/bin/mingwX64/releaseExecutable/*

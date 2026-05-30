@@ -1,4 +1,9 @@
 <project version="4">
+  <component name="CidrRootsConfiguration">
+    <excludeRoots>
+      <file path="$PROJECT_DIR$/buildSrc/build" />
+    </excludeRoots>
+  </component>
   <component name="EntryPointsManager">
     <list size="2">
       <item index="0" class="java.lang.String" itemvalue="oci.AfterClass" />

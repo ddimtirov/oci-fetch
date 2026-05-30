@@ -1,17 +1,17 @@
 plugins {
     id("oci-fetch.kmp-conventions")
-    id("oci-fetch.locking")
     id("oci-fetch.testing")
-    id("oci-fetch.native-tooling")
+    id("oci-fetch.locking")
 }
-
-repositories {
-    mavenCentral()
-}
-
 
 kotlin {
     jvm()
+    linuxX64()
+    mingwX64()
+    @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+    wasmJs {
+        nodejs()
+    }
     js {
         nodejs {
             testTask {
@@ -21,20 +21,14 @@ kotlin {
             }
         }
     }
-    @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
-    wasmJs {
-        nodejs()
-    }
-    linuxX64()
-    mingwX64()
 
     sourceSets {
         commonTest.dependencies {
-            implementation(project(":")) // Depend on the core KMP library
+            implementation(project(":oci-fetch-lib")) // Depend on the core KMP library
+            implementation(kotlin("test"))
             implementation(libs.ktor.client.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.test)
-            implementation(kotlin("test"))
         }
 
         jvmTest.dependencies {

@@ -1,11 +1,7 @@
 plugins {
     id("oci-fetch.kmp-conventions")
-    id("oci-fetch.locking")
     id("oci-fetch.testing")
-}
-
-repositories {
-    mavenCentral()
+    id("oci-fetch.locking")
 }
 
 kotlin {
@@ -13,15 +9,16 @@ kotlin {
 
     sourceSets {
         jvmTest.dependencies {
-            implementation(project(":"))
+            implementation(project(":oci-fetch-lib"))
+            implementation(kotlin("test"))
             implementation(libs.junit.jupiter)
             implementation(libs.junit.platform.launcher)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.kotlinx.serialization.json)
-            implementation(kotlin("test"))
             implementation(libs.ktor.client.core)
             implementation(libs.testcontainers)
             implementation(libs.testcontainers.junit.jupiter)
         }
     }
 }
+

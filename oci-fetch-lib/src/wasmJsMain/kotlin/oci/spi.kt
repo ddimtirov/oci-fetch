@@ -16,6 +16,6 @@ internal actual fun urlEncode(s: String): String = encodeURIComponentWasm(s)
 /**
  * WASM-JS-specific URL encoding using encodeURIComponent.
  */
-@OptIn(kotlin.js.ExperimentalWasmJsInterop::class)
+@OptIn(ExperimentalWasmJsInterop::class)
 @JsFun("(s) => encodeURIComponent(s)")
 private external fun encodeURIComponentWasm(s: String): String
