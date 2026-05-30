@@ -2,8 +2,8 @@ package oci
 
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpHeaders
-
-private val nextRelRegex = Regex("""\brel\s*=\s*"?next"?""", RegexOption.IGNORE_CASE)
+import io.ktor.http.URLBuilder
+import io.ktor.http.takeFrom
 
 /**
  * Extracts the URL of the next OCI API page from the `Link` header of a response,
@@ -27,13 +27,18 @@ fun HttpResponse.nextPageUrl(
     registry: String,
     v2endpoint: String
 ): String? {
-    return firstLinkHeader(this)?.let {
+    val link = firstLinkHeader(this) ?: return null
+    return try {
+        val base = this.call.request.url
+        URLBuilder().takeFrom(base).takeFrom(link).buildString()
+    } catch (e: Exception) {
+        // Fallback robust resolution logic in case URLBuilder fails under certain platform conditions
         when {
-            it.startsWith("https://") || it.startsWith("http://") -> it
-            it.startsWith("/") -> "https://$registry$it"
-            it.startsWith("v2/") -> "https://$registry/$it"
-            it.startsWith("?") -> "https://$registry/v2/$v2endpoint$it"
-            else -> error("Unsupported pagination URL in Link header: $it")
+            link.startsWith("https://") || link.startsWith("http://") -> link
+            link.startsWith("/") -> "https://$registry$link"
+            link.startsWith("v2/") -> "https://$registry/$link"
+            link.startsWith("?") -> "https://$registry/v2/$v2endpoint$link"
+            else -> error("Unsupported pagination URL in Link header: $link")
         }
     }
 }
@@ -41,16 +46,28 @@ fun HttpResponse.nextPageUrl(
 private fun firstLinkHeader(response: HttpResponse): String? {
     val linkHeaders = response.headers.getAll(HttpHeaders.Link) ?: return null
 
-    val linkHeader = linkHeaders
-        .flatMap { it.split(',') }
-        .map { it.trim() }
-        .firstOrNull { nextRelRegex.containsMatchIn(it) }
-        ?: return null
+    for (header in linkHeaders) {
+        val parts = header.split(',')
+        for (part in parts) {
+            val segments = part.split(';')
+            if (segments.isEmpty()) continue
+            val linkPart = segments[0].trim()
+            if (!linkPart.startsWith("<") || !linkPart.endsWith(">")) continue
+            val url = linkPart.removePrefix("<").removeSuffix(">")
 
-    val rawUrl = linkHeader.substringBefore(';').trim()
-    check(rawUrl.startsWith("<") && rawUrl.endsWith(">")) {
-        "Malformed pagination Link header: $linkHeader"
+            // Look for rel="next" parameter
+            for (i in 1 until segments.size) {
+                val param = segments[i].trim()
+                val kv = param.split('=', limit = 2)
+                if (kv.size == 2 && kv[0].trim().equals("rel", ignoreCase = true)) {
+                    val relValue = kv[1].trim().trim('"')
+                    val rels = relValue.split(Regex("\\s+")).map { it.lowercase() }
+                    if ("next" in rels) {
+                        return url
+                    }
+                }
+            }
+        }
     }
-
-    return rawUrl.removePrefix("<").removeSuffix(">")
+    return null
 }
