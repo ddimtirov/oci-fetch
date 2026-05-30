@@ -40,6 +40,13 @@ class OciClientIT {
         // We use Class-level (@BeforeClass / @AfterClass) test fixture setup rather than Suite-level
         // to balance proper test isolation between different test classes (avoiding state leakage and side effects)
         // while still gaining connection pooling and socket reuse efficiency across tests in the same class.
+        //
+        // NOTE ON PLATFORM LIFECYCLE:
+        // While class-level hooks (@BeforeClass/@AfterClass) are only supported on the JVM,
+        // this is compensated by our double-mechanism design:
+        // 1. The lazy-initialization fallback in getClient() ensures functional correctness and initializes
+        //    the client on non-JVM platforms where the class hooks are ignored.
+        // 2. The JVM-specific class hooks ensure optimal socket/connection reuse on the JVM.
         @BeforeClass
         @JvmStatic
         fun setUpClass() {
