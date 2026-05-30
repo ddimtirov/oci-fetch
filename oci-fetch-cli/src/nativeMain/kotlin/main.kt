@@ -91,7 +91,9 @@ class IndexCommand(
     private suspend fun queryAndFormat(client: OciClient, raw: Boolean, selector: PlatformSelector): String {
         val imageRef = OciRef.parse(ref)
         val response = client.requestManifest(imageRef)
-        check(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
+        if (!response.status.isSuccess()) {
+            throw OciFetchRuntimeError("Failed to fetch manifest: ${response.status}")
+        }
 
         val body = response.bodyAsText()
         val contentType = response.headers[HttpHeaders.ContentType] ?: ""
@@ -99,8 +101,12 @@ class IndexCommand(
 
         val isIndex = client.isOciImageIndex(json, contentType)
         val isManifest = client.isOciImageManifest(json)
-        check(isIndex || isManifest) { "Reference points to neither an index nor a manifest (Content-Type: $contentType)" }
-        check(isIndex || !requireIndex) { "--fail was requested and reference points to a non-index." }
+        if (!(isIndex || isManifest)) {
+            throw OciFetchRuntimeError("Reference points to neither an index nor a manifest (Content-Type: $contentType)")
+        }
+        if (!(isIndex || !requireIndex)) {
+            throw OciFetchRuntimeError("--fail was requested and reference points to a non-index.")
+        }
 
         if (raw) return body // pass through whatever we got, regardless of whether we recognize it as an index
 
@@ -142,7 +148,9 @@ class ReferrersCommand(
                     selector.hasConstraints() -> client.resolveToImageManifest(imageRef, selector).also { check(it.isDigest) }
                     else -> {
                         val response = client.requestManifest(imageRef)
-                        check(response.status.isSuccess()) { "Failed to fetch manifest: ${response.status}" }
+                        if (!response.status.isSuccess()) {
+                            throw OciFetchRuntimeError("Failed to fetch manifest: ${response.status}")
+                        }
                         val digest = response.headers["Docker-Content-Digest"]
                             ?: ("sha256:" + SHA256().digest(response.bodyAsBytes()).toHexString())
                         imageRef.withDigest(digest)
@@ -182,7 +190,9 @@ class ManifestCommand(
             val output = OciClient().use { client ->
                 val imageRef = client.resolveToImageManifest(OciRef.parse(ref), selector)
                 val manifestResponse = client.requestManifest(imageRef)
-                check(manifestResponse.status.isSuccess()) { "Failed to fetch manifest: ${manifestResponse.status}" }
+                if (!manifestResponse.status.isSuccess()) {
+                    throw OciFetchRuntimeError("Failed to fetch manifest: ${manifestResponse.status}")
+                }
                 val manifestStr = manifestResponse.bodyAsText()
 
                 if (raw) manifestStr else formatTsvManifest(manifestStr)
@@ -214,7 +224,9 @@ class ConfigCommand(
                 val ref = OciRef.parse(this@ConfigCommand.ref)
                 val imageRef = client.resolveToImageManifest(ref, selector)
                 val config = client.fetchAllMetadata(imageRef).images.single().config
-                check(config!=null) { "Manifest has no config" }
+                if (config == null) {
+                    throw OciFetchRuntimeError("Manifest has no config")
+                }
 
                 if (raw) config else formatPrettyJson(config)
             }
@@ -251,7 +263,9 @@ class GetCommand(private val globalRaw: () -> Boolean) : CliktCommand(name = "ge
         while (nextUrl != null) {
             if (visitedPages.isNotEmpty()) println("---")
 
-            check(visitedPages.add(nextUrl)) { "Detected pagination loop at $nextUrl" }
+            if (!visitedPages.add(nextUrl)) {
+                throw OciFetchRuntimeError("Detected pagination loop at $nextUrl")
+            }
             val response = client.requestUrl(nextUrl, null)
 
             val body = response.bodyAsText()
@@ -356,10 +370,13 @@ class ParseFormatCommand(
     }
 }
 
+class OciFetchRuntimeError(message: String) : RuntimeException(message)
+
 private const val ERR_COMMAND_LINE_PARSING = 1
 private const val ERR_INTERNAL_ERROR = 10
 private const val ERR_NO_SUCH_PLATFORM = 11
 private const val ERR_AMBIGUOUS_PLATFORM = 12
+private const val ERR_RUNTIME_FAILURE = 13
 
 @Suppress("TooGenericExceptionCaught") // root error handler
 fun main(args: Array<String>) {
@@ -397,6 +414,9 @@ fun main(args: Array<String>) {
     } catch (e: AmbiguousPlatformSelectionException) {
         ociFetch.echo(platformSelectionError(e, e.candidates), err = true)
         platform.posix.exit(ERR_AMBIGUOUS_PLATFORM)
+    } catch (e: OciFetchRuntimeError) {
+        ociFetch.echo(e.message ?: "Runtime error", err = true)
+        platform.posix.exit(ERR_RUNTIME_FAILURE)
     } catch (topLevel: Exception) {
         ociFetch.echo("Error: " + (topLevel.message ?: "Unknown error") , err = true)
         platform.posix.exit(ERR_INTERNAL_ERROR)
