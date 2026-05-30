@@ -20,16 +20,51 @@ data class OciRef(
 
     companion object {
         /**
-         * Parses an image reference string into an ImageRef.
-         * Example: registry-1.docker.io/library/alpine:latest
+         * Parses an image reference string into an ImageRef using standard Docker conventions.
+         * If the first segment is not recognized as a registry host (lacks '.', ':', and is not 'localhost'),
+         * it defaults the registry to 'registry-1.docker.io'. If the repository name contains no '/',
+         * it automatically prepends 'library/'.
          */
         fun parse(spec: String, defaultTag: String = "latest"): OciRef {
-            // input like: registry-1.docker.io/library/alpine
-            val parts = spec.split('/')
-            require(parts.size >= 2) { "Invalid image reference: $spec" }
+            return parse(spec, defaultTag, strict = false)
+        }
 
-            val registry = parts.first()
-            val repo = parts.drop(1).joinToString("/")
+        /**
+         * Parses an image reference string into an ImageRef in strict mode, without any Docker-specific
+         * defaults or fallbacks. The first segment is always assumed to be the registry host.
+         */
+        fun parseStrict(spec: String, defaultTag: String = "latest"): OciRef {
+            return parse(spec, defaultTag, strict = true)
+        }
+
+        private fun parse(spec: String, defaultTag: String, strict: Boolean): OciRef {
+            val parts = spec.split('/')
+            
+            val registry: String
+            val repo: String
+            
+            if (strict) {
+                require(parts.size >= 2) { "Invalid image reference: $spec" }
+                registry = parts.first()
+                repo = parts.drop(1).joinToString("/")
+            } else {
+                val first = parts.first()
+                val isRegistry = first.contains('.') || first.contains(':') || first == "localhost"
+                
+                if (isRegistry) {
+                    registry = first
+                    repo = parts.drop(1).joinToString("/")
+                } else {
+                    registry = "registry-1.docker.io"
+                    val fullRepo = spec
+                    repo = if ('/' !in fullRepo) {
+                        "library/$fullRepo"
+                    } else {
+                        fullRepo
+                    }
+                }
+            }
+
             return when {
                 '@' in repo -> {
                     val (r, digest) = repo.split('@', limit = 2)
