@@ -10,7 +10,7 @@ A Kotlin Multiplatform library **and** command-line tool for inspecting OCI (Ope
 ## What Can It Do?
 
 - **List tags** for any repository
-- **List repositories** in a registry via the Docker `_catalog` API
+- **List repositories** in a registry via the Docker `_catalog` API (library API)
 - **Inspect image indexes** (multi-arch manifests) and platform-specific manifests
 - **Read image configuration** (env vars, entrypoint, labels, layer history)
 - **Discover supply-chain artifacts** — signatures, SBOMs, and attestations via the OCI Referrers API
@@ -65,8 +65,11 @@ oci-fetch meta config registry-1.docker.io/library/alpine:latest
 # Discover signatures and SBOMs
 oci-fetch meta referrers registry-1.docker.io/curlimages/curl:latest
 
-# Any command with --raw for JSON output (pipe to jq, etc.)
+# Network fetch commands support --raw for unformatted output (pipe to jq, etc.)
 oci-fetch --raw tags registry-1.docker.io/library/alpine
+
+# Parse commands read stdin and do not support --raw
+cat manifest.json | oci-fetch parse manifest
 ```
 
 See the full [CLI Reference](docs/tool-oci-fetch.md) for all commands, options, and use cases.

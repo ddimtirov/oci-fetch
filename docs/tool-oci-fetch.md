@@ -1,5 +1,5 @@
 # `oci-fetch` tool
-The `oci-fetch` is a native CLI tool for inspecting OCI container image metadata directly from registries **without pulling images**. It outputs machine-parseable TSV by default (for scripting/piping) or raw JSON (`--raw`).
+The `oci-fetch` is a native CLI tool for inspecting OCI container image metadata directly from registries **without pulling images**. Fetching commands output machine-parseable TSV by default (for scripting/piping) or raw output with `--raw`.
 
 
 ## Usage overview
@@ -21,11 +21,11 @@ The command line tool is intended for exploration or for when we want to use she
 | pending  | `oci-fetch layer file <ref> <layerIdx> <path>`     | Fetch a single file from a layer.                                                                                           |
 | pending  | `oci-fetch layer annotate <ref> <layerIdx> <note>` | Annotate a layer with a note. Notes will be shown in `layer indices` output.                                                |
 
-There are a few options that you can specify for many opf the `oci-fetch` commands:
+There are a few options and behaviors shared across command groups:
 
-- **Raw text**: All commands support `--raw` to output unprocessed JSON instead of TSV, useful when piping to `jq` or other JSON tools.
-- **Platform selection**: The `meta` subcommands accept `--architecture`, `--os`, `--os-version`, `--os-features`, and `--variant` to target a specific platform in multi-arch images. Helpful error messages list available platforms when selection fails.
-- **Exit codes**: Distinct exit codes (0 = success, 1 = CLI error, 10 = general error, 11 = no matching platform, 12 = ambiguous platform) enable reliable scripting.
+- **Raw text**: `--raw` is a root option and applies to fetching commands (`get`, `tags`, and `meta` subcommands). `parse` commands do not support `--raw`.
+- **Platform selection**: `meta` subcommands accept `--architecture`, `--os`, `--os-version`, `--os-features`, and `--variant` to target a specific platform in multi-arch images. Helpful error messages list available platforms when selection fails.
+- **Exit codes**: Distinct exit codes (0 = success, 1 = CLI parsing error, 10 = internal error, 11 = no matching platform, 12 = ambiguous platform, 13 = runtime failure) enable reliable scripting.
 
 The following use-cases are building blocks for higher level governance and container management tasks. Each of them is satisfied as a single invocation of the `oci-fetch` tool.
 
@@ -37,6 +37,8 @@ The following use-cases are building blocks for higher level governance and cont
 **Why:** Useful for ad-hoc exploration of registry API endpoints (e.g., fetching a specific blob or API path) without manually handling Bearer-token authentication. 
 
 Some common usages are to fetch the list of repositories using a registry-specific API; or to query a registry about the supported version of APIs or optional features.
+
+When the response is paginated, `oci-fetch get` automatically follows `Link: ... rel="next"` pages and prints `---` between page outputs.
 
 ### UC2: List repository tags (`oci-fetch tags <repo>`)
 
@@ -52,9 +54,11 @@ Some common usages are to fetch the list of repositories using a registry-specif
 
 The `oci-fetch` formatting emphasizes Linux-friendly line-oriented output. This allows you to use common shell and in particular `while read ...` and `cut` commands against JSON you have from another tool.
 
+`parse` is intentionally local-only formatting: it reads stdin and performs no network requests. Passing `--raw` with `parse` returns a CLI error.
+
 ### UC4: Inspect the image index (`oci-fetch meta index <ref>`)
 
-**What:** Fetches the top-level manifest for a reference and displays it as a TSV table of platforms (digest, mediaType, os, architecture, variant, etc.). Supports `--fail` to error if the ref isn't an index. Platform filtering options (`--os`, `--architecture`, etc.) narrow the output.
+**What:** Fetches the top-level manifest for a reference and displays it as a TSV table of platforms (digest, mediaType, os, architecture, variant, etc.). Supports `--fail` to error if the ref is not an index. Platform filtering options (`--os`, `--architecture`, etc.) narrow the output.
 
 **Why:** Lets you quickly see which platforms a multi-arch image supports, or verify that a specific platform variant is published.
 
